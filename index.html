@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Alkaline Electrolyzer Performance Simulation</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+
+<div class="sim-bg"></div>
+<div class="bg-orb bg-orb1"></div>
+<div class="bg-orb bg-orb2"></div>
+<div class="bg-orb bg-orb3"></div>
+
+<div class="app">
+<header>
+  <div class="hlogo">
+    <div class="hlogo-icon">⚗</div>
+    <span class="htitle">Alkaline Electrolyzer Performance Simulation</span>
+    <span style="font-size:10px;color:var(--txt3);margin-left:4px">Alkaline Water Electrolysis</span>
+  </div>
+  <div class="hright">
+    <div id="clock"></div>
+    <div class="live-pill">
+      <div class="pulse" id="pulse_dot"></div>
+      <span id="live_lbl">LIVE</span>
+    </div>
+    <button class="pause-btn" id="pause_btn" onclick="togglePause()">⏸ Pause</button>
+  </div>
+</header>
+
+<div class="main">
+
+<!-- SIDEBAR -->
+<div class="sidebar">
+  <div class="card">
+    <div class="card-title">Operating Parameters</div>
+    <div class="sl-group">
+      <div class="sl-row"><span class="sl-lbl">Temperature</span><span class="sl-val" id="T_disp">80 °C</span></div>
+      <input type="range" class="t-sl" id="sl_T" min="20" max="90" step="1" value="80" oninput="onSlide()">
+      <div class="sl-ends"><span>20°C</span><span>90°C</span></div>
+    </div>
+    <div class="sl-group">
+      <div class="sl-row"><span class="sl-lbl">Pressure</span><span class="sl-val" id="P_disp">3.0 bar</span></div>
+      <input type="range" class="p-sl" id="sl_P" min="1" max="10" step="0.5" value="3" oninput="onSlide()">
+      <div class="sl-ends"><span>1 bar</span><span>10 bar</span></div>
+    </div>
+    <div class="sl-group">
+      <div class="sl-row"><span class="sl-lbl">Current Density</span><span class="sl-val" id="j_disp">0.10 A/cm²</span></div>
+      <input type="range" class="j-sl" id="sl_j" min="0.05" max="1.0" step="0.05" value="0.10" oninput="onSlide()">
+      <div class="sl-ends"><span>0.05</span><span>1.0 A/cm²</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Voltage Breakdown</div>
+    <div class="vbar" id="vbar_el"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
+      <span style="display:flex;align-items:center;gap:3px;font-size:10px;color:var(--txt3)">
+        <span style="width:8px;height:8px;border-radius:2px;background:#10b981;display:inline-block"></span>E_rev</span>
+      <span style="display:flex;align-items:center;gap:3px;font-size:10px;color:var(--txt3)">
+        <span style="width:8px;height:8px;border-radius:2px;background:#ef4444;display:inline-block"></span>η_act</span>
+      <span style="display:flex;align-items:center;gap:3px;font-size:10px;color:var(--txt3)">
+        <span style="width:8px;height:8px;border-radius:2px;background:#3b82f6;display:inline-block"></span>η_ohm</span>
+    </div>
+    <table class="vtbl" style="margin-top:8px">
+      <tr><th>Component</th><th style="text-align:right">Value</th></tr>
+      <tr><td>E_rev</td><td id="v_Erev">—</td></tr>
+      <tr><td>η_act cathode</td><td id="v_etac">—</td></tr>
+      <tr><td>η_act anode</td><td id="v_etaa">—</td></tr>
+      <tr><td>η_ohmic</td><td id="v_ohm">—</td></tr>
+      <tr style="border-top:1px solid var(--brd2)">
+        <td style="color:var(--txt1);font-weight:700">V_cell</td>
+        <td id="v_Vcell" style="color:#60a5fa;font-weight:700;text-align:right">—</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="card-title">System Stats</div>
+    <table class="vtbl">
+      <tr><td>Bubble Coverage θ</td><td id="s_bub">—</td></tr>
+      <tr><td>KOH Conductivity</td><td id="s_sKOH">—</td></tr>
+      <tr><td>Cell Current</td><td id="s_Icell">—</td></tr>
+      <tr><td>Stack Voltage</td><td id="s_Vstack">—</td></tr>
+      <tr><td>H₂ (Nm³/hr)</td><td id="s_Nm3">—</td></tr>
+      <tr><td>Molar Flow</td><td id="s_hmol">—</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Base Paper Comparison</div>
+    <table class="cmp-tbl">
+      <thead><tr><th>Param</th><th>Model</th><th>Paper</th><th>Err</th></tr></thead>
+      <tbody id="cmp_body"></tbody>
+    </table>
+    <div style="font-size:9px;color:var(--txt3);margin-top:5px">T=80°C, P=3bar, j=0.1 A/cm²</div>
+  </div>
+</div>
+
+<!-- CONTENT -->
+<div class="content">
+
+  <div id="paused_banner" class="paused-banner">⏸ Monitoring paused — click Resume to continue live data</div>
+
+  <!-- KPI ROW 1 -->
+  <div class="kpi-grid">
+    <div class="kpi blue"><div class="kpi-lbl">Cell Voltage</div><div class="kpi-val" id="k_Vcell">—<span class="kpi-unit">V</span></div><div id="kb_V"></div></div>
+    <div class="kpi green"><div class="kpi-lbl">Efficiency</div><div class="kpi-val" id="k_eff">—<span class="kpi-unit">%</span></div><div id="kb_eff"></div></div>
+    <div class="kpi cyan"><div class="kpi-lbl">H₂ Production</div><div class="kpi-val" id="k_h2">—<span class="kpi-unit">kg/hr</span></div><div id="kb_h2"></div></div>
+    <div class="kpi purple"><div class="kpi-lbl">Stack Power</div><div class="kpi-val" id="k_P">—<span class="kpi-unit">kW</span></div><div id="kb_P"></div></div>
+  </div>
+  <!-- KPI ROW 2 -->
+  <div class="kpi-grid" style="margin-top:-4px">
+    <div class="kpi orange"><div class="kpi-lbl">SEC</div><div class="kpi-val" id="k_SEC">—<span class="kpi-unit">kWh/kg</span></div><div id="kb_SEC"></div></div>
+    <div class="kpi red"><div class="kpi-lbl">Act. Overvolt.</div><div class="kpi-val" id="k_act">—<span class="kpi-unit">V</span></div></div>
+    <div class="kpi blue"><div class="kpi-lbl">Ohmic OV</div><div class="kpi-val" id="k_ohm">—<span class="kpi-unit">V</span></div></div>
+    <div class="kpi green"><div class="kpi-lbl">H₂ Molar Rate</div><div class="kpi-val" id="k_hmol">—<span class="kpi-unit">mmol/s</span></div></div>
+  </div>
+
+  <!-- TABS -->
+  <div class="tabs">
+    <button class="tab active" onclick="showTab('live',this)">Live Monitoring</button>
+    <button class="tab" onclick="showTab('sweep',this)">Parametric Study</button>
+    <button class="tab" onclick="showTab('ml',this)">Performance Analysis</button>
+    <button class="tab" onclick="showTab('sens',this)">Sensitivity Study</button>
+    <button class="tab" onclick="showTab('fc',this)">Forecasting</button>
+  </div>
+
+  <!-- LIVE MONITOR -->
+  <div id="tab_live" class="tab-pane active">
+    <div class="ch-grid3">
+      <div class="ch-wrap"><div class="ch-title">Cell Voltage (V)</div><canvas id="ch_V"></canvas></div>
+      <div class="ch-wrap"><div class="ch-title">Efficiency (%)</div><canvas id="ch_E"></canvas></div>
+      <div class="ch-wrap"><div class="ch-title">H₂ Production (kg/hr)</div><canvas id="ch_H"></canvas></div>
+      <div class="ch-wrap"><div class="ch-title">Stack Power (kW)</div><canvas id="ch_P2"></canvas></div>
+      <div class="ch-wrap"><div class="ch-title">SEC (kWh/kg)</div><canvas id="ch_S"></canvas></div>
+      <div class="ch-wrap"><div class="ch-title">Bubble Coverage θ</div><canvas id="ch_B"></canvas></div>
+    </div>
+  </div>
+
+  <!-- PARAMETRIC SWEEP -->
+  <div id="tab_sweep" class="tab-pane">
+    <div style="display:flex;gap:8px;margin-bottom:11px;flex-wrap:wrap;align-items:center">
+      <select id="sw_x" onchange="runSweep()">
+        <option value="j">X: Current Density j</option>
+        <option value="T">X: Temperature T</option>
+        <option value="P">X: Pressure P</option>
+      </select>
+      <select id="sw_y" onchange="runSweep()">
+        <option value="V_cell">Y: Cell Voltage</option>
+        <option value="eff">Y: Efficiency</option>
+        <option value="h2_kg_hr">Y: H₂ Production</option>
+        <option value="P_stack_kW">Y: Stack Power</option>
+        <option value="SEC">Y: SEC</option>
+        <option value="act_ov">Y: Activation OV</option>
+        <option value="ohm_ov">Y: Ohmic OV</option>
+      </select>
+      <button class="btn btn-blue" onclick="runSweep()">▶ Run</button>
+    </div>
+    <div class="ch-wrap" style="margin-bottom:12px"><canvas id="ch_sweep" style="max-height:240px"></canvas></div>
+    <div class="ch-grid3">
+      <div class="ch-wrap"><div class="ch-title">V_cell vs j — T parametric</div><canvas id="ch_sw1"></canvas></div>
+      <div class="ch-wrap"><div class="ch-title">Efficiency vs j — T parametric</div><canvas id="ch_sw2"></canvas></div>
+      <div class="ch-wrap"><div class="ch-title">H₂ vs j — P parametric</div><canvas id="ch_sw3"></canvas></div>
+    </div>
+  </div>
+
+  <!-- PERFORMANCE ANALYSIS -->
+  <div id="tab_ml" class="tab-pane">
+    <div class="ml-grid">
+      <div class="ml-card">
+        <div class="ml-title">Prediction Results</div>
+        <div style="font-size:10px;color:var(--txt3);margin-bottom:8px">Polynomial Regression Model · R²≈0.9994</div>
+        <div style="font-size:11px;margin-bottom:2px;color:var(--txt2)">Predicted V_cell</div>
+        <div id="ml_V" style="font-size:15px;font-weight:700;color:#60a5fa;margin-bottom:5px">—</div>
+        <div style="font-size:11px;margin-bottom:2px;color:var(--txt2)">Predicted Efficiency</div>
+        <div id="ml_eff" style="font-size:15px;font-weight:700;color:#34d399;margin-bottom:5px">—</div>
+        <div style="font-size:11px;margin-bottom:2px;color:var(--txt2)">Predicted H₂</div>
+        <div id="ml_h2" style="font-size:15px;font-weight:700;color:#67e8f9">—</div>
+      </div>
+      <div class="ml-card">
+        <div class="ml-title">Optimum Operating Conditions</div>
+        <div style="font-size:10px;color:var(--txt3);margin-bottom:8px">Max efficiency · Min power · Grid search 3600 pts</div>
+        <button class="btn btn-green" onclick="runOpt()" style="width:100%;margin-bottom:9px">▶ Find Optimum</button>
+        <div id="opt_out" style="font-size:11px;line-height:1.9;color:var(--txt2)">Click to optimize...</div>
+      </div>
+      <div class="ml-card">
+        <div class="ml-title">Operating Status</div>
+        <div id="anom_out" style="font-size:11px;line-height:2.2;color:var(--txt2)">—</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-title">Methodology</div>
+      <div style="font-size:11px;color:var(--txt2);line-height:2">
+        1. Electrochemical equations were implemented from published alkaline electrolyzer studies.<br>
+        2. Voltage losses were calculated using activation and ohmic models.<br>
+        3. Hydrogen production rate was obtained using Faraday's law.<br>
+        4. Parametric studies were performed for temperature, pressure and current density.
+      </div>
+    </div>
+
+    <div class="ai-panel">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="font-size:11px;font-weight:700;color:#60a5fa;text-transform:uppercase;letter-spacing:1px">
+          Performance Evaluation
+        </div>
+        <button class="btn btn-blue" id="report_btn" onclick="evaluatePerformance('')">▶ Generate Report</button>
+      </div>
+      <div class="ai-out" id="report_out">Click the button to view a performance summary of the electrolyzer.</div>
+      <div class="ai-row">
+        <input class="ai-inp" id="report_query"
+          placeholder="Enter an engineering query"
+          onkeydown="if(event.key==='Enter')evaluatePerformance(this.value)"/>
+        <button class="btn btn-blue" onclick="evaluatePerformance(document.getElementById('report_query').value)">Ask</button>
+      </div>
+      <div class="chips">
+        <button class="chip" onclick="evaluatePerformance('Why is activation overvoltage dominant?')">Why high η_act?</button>
+        <button class="chip" onclick="evaluatePerformance('What is the optimal operating point?')">Optimal point?</button>
+        <button class="chip" onclick="evaluatePerformance('How does temperature affect efficiency?')">T effect?</button>
+        <button class="chip" onclick="evaluatePerformance('How to reduce SEC?')">Reduce SEC?</button>
+        <button class="chip" onclick="evaluatePerformance('Compare results with base paper values')">Paper compare?</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SENSITIVITY -->
+  <div id="tab_sens" class="tab-pane">
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-title">Normalized Sensitivity — H₂ Production</div>
+      <div style="font-size:10px;color:var(--txt3);margin-bottom:12px">
+        Sᵢ = |∂ṁH₂/∂xᵢ| · xᵢ/ṁH₂ — central finite differences at current operating point
+      </div>
+      <div id="sens_bars"></div>
+    </div>
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-title">Elasticity Index Table</div>
+      <div id="sobol_table" style="font-size:11px;color:var(--txt2)"></div>
+    </div>
+    <div class="ch-grid3">
+      <div class="ch-wrap"><div class="ch-title">H₂ vs Temperature</div><canvas id="ch_sT"></canvas></div>
+      <div class="ch-wrap"><div class="ch-title">H₂ vs Pressure</div><canvas id="ch_sP"></canvas></div>
+      <div class="ch-wrap"><div class="ch-title">Efficiency vs j</div><canvas id="ch_sj"></canvas></div>
+    </div>
+  </div>
+
+  <!-- FORECAST -->
+  <div id="tab_fc" class="tab-pane">
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-title">Production Trend</div>
+      <div style="font-size:10px;color:var(--txt3);margin-bottom:10px">
+        ṁH₂(t) = ṁ₀ · exp(−λt) · f_T(T) · f_j(j) · [1 + ε·sin(ωt)] · [1 − δ·⌊t/t_c⌋]
+      </div>
+      <div class="fc-grid">
+        <div class="fc-card">
+          <div class="fc-time">At 1 Hour</div>
+          <div class="fc-val" id="fc_1h">—</div>
+          <div id="fc_1t" style="font-size:10px"></div>
+        </div>
+        <div class="fc-card">
+          <div class="fc-time">At 6 Hours</div>
+          <div class="fc-val" id="fc_6h">—</div>
+          <div id="fc_6t" style="font-size:10px"></div>
+        </div>
+        <div class="fc-card">
+          <div class="fc-time">At 24 Hours</div>
+          <div class="fc-val" id="fc_24h">—</div>
+          <div id="fc_24t" style="font-size:10px"></div>
+        </div>
+      </div>
+      <div id="fc_params" style="font-size:9px;color:var(--txt3);margin-top:5px"></div>
+    </div>
+    <div class="ch-wrap">
+      <div class="ch-title">24-Hour Forecast with Uncertainty Bands</div>
+      <div style="position:relative;width:100%;height:260px">
+        <canvas id="ch_fc"></canvas>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /content -->
+</div><!-- /main -->
+
+<div class="stat-bar">
+  <span>Electrolyzer Simulation</span>
+  <span>η = E_th/V_cell × 100 · E_th = 1.48V</span>
+  <span id="st_upd">Last update: —</span>
+  <span style="margin-left:auto;color:#374151">Alkaline Electrolyzer Performance Simulation · Department of Mechanical Engineering · Academic Project 2026</span>
+</div>
+
+</div><!-- /app -->
+
+<script src="script.js"></script>
+</body>
+</html>
