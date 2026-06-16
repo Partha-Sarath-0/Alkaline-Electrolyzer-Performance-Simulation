@@ -213,3 +213,202 @@ select:focus{border-color:var(--acc1);box-shadow:0 0 0 3px rgba(29,78,216,0.1)}
 ::-webkit-scrollbar-track{background:var(--bg2)}
 ::-webkit-scrollbar-thumb{background:var(--brd2);border-radius:3px}
 ::-webkit-scrollbar-thumb:hover{background:var(--acc1)}
+
+/* Cost Analysis Summary — monospace keeps space-aligned columns intact */
+#cost_summary{
+  font-family:'Courier New',Courier,monospace;
+  overflow-x:auto;
+  -webkit-overflow-scrolling:touch;
+  /* horizontal rule character renders at full width */
+  word-break:keep-all
+}
+
+
+/* ================================================================
+   RESPONSIVE BREAKPOINTS — No changes to visuals, layout only
+   ================================================================ */
+
+/* ---- Small Desktop / Large Tablet (≤ 1100px) ---- */
+@media (max-width:1100px){
+  .main{grid-template-columns:210px 1fr}
+  .kpi-grid{grid-template-columns:repeat(2,1fr)}
+  .ch-grid3{grid-template-columns:repeat(2,1fr)}
+  .ml-grid{grid-template-columns:repeat(2,1fr)}
+  .health-grid{grid-template-columns:repeat(2,1fr)}
+  .cost-grid{grid-template-columns:repeat(2,1fr)}
+  .htitle span{display:none}
+  .htitle{font-size:13px}
+}
+
+/* ---- Tablet Portrait (≤ 900px) ---- */
+@media (max-width:900px){
+  .main{grid-template-columns:185px 1fr}
+  .ch-grid2{grid-template-columns:1fr}
+  .fc-grid{grid-template-columns:repeat(2,1fr)}
+  .kpi-val{font-size:16px}
+  /* Tabs: horizontal scroll instead of wrapping */
+  .tabs{
+    overflow-x:auto;
+    flex-wrap:nowrap;
+    -webkit-overflow-scrolling:touch;
+    scrollbar-width:none;
+    padding-bottom:2px
+  }
+  .tabs::-webkit-scrollbar{display:none}
+  .tab{flex-shrink:0;font-size:10.5px;padding:6px 9px}
+}
+
+/* ---- Mobile Landscape / Large Phone (≤ 768px) ---- */
+@media (max-width:768px){
+  /* Allow the page to scroll freely */
+  html,body{height:auto;overflow:auto}
+
+  /* App becomes a flex column so everything stacks and scrolls */
+  .app{
+    display:flex;
+    flex-direction:column;
+    height:auto;
+    min-height:100vh;
+    overflow:visible
+  }
+
+  /* Header: allow wrapping on narrow viewports */
+  header{
+    height:auto;
+    min-height:48px;
+    padding:8px 14px;
+    flex-wrap:wrap;
+    gap:6px;
+    flex-shrink:0
+  }
+
+  /* Main: sidebar on top, content below */
+  .main{
+    display:flex;
+    flex-direction:column;
+    height:auto;
+    overflow:visible;
+    flex:1
+  }
+
+  /* Sidebar: full-width 2-column card grid */
+  .sidebar{
+    overflow-y:visible;
+    border-right:none;
+    border-bottom:2px solid var(--brd);
+    padding:12px;
+    display:grid;
+    grid-template-columns:repeat(2,1fr);
+    gap:10px;
+    width:100%
+  }
+  .sidebar .card{margin-bottom:0}
+
+  /* Content: unrestricted scroll */
+  .content{
+    overflow-y:visible;
+    padding:12px;
+    width:100%
+  }
+
+  /* Grids */
+  .kpi-grid{grid-template-columns:repeat(2,1fr);gap:6px}
+  .ch-grid3{grid-template-columns:1fr}
+  .ch-grid2{grid-template-columns:1fr}
+  .ml-grid{grid-template-columns:1fr}
+  .health-grid{grid-template-columns:1fr}
+  .fc-grid{grid-template-columns:1fr}
+  .cost-grid{grid-template-columns:repeat(2,1fr)}
+  .temp-grid{grid-template-columns:repeat(3,1fr)}
+
+  /* KPI cards */
+  .kpi-val{font-size:15px}
+  .kpi{padding:8px 10px}
+
+  /* Tabs: always scrollable */
+  .tabs{
+    overflow-x:auto;
+    flex-wrap:nowrap;
+    -webkit-overflow-scrolling:touch;
+    scrollbar-width:none;
+    padding-bottom:2px
+  }
+  .tabs::-webkit-scrollbar{display:none}
+  .tab{flex-shrink:0;font-size:10px;padding:6px 9px}
+
+  /* Purity rings: wrap on narrow screens */
+  .purity-ring-wrap{flex-wrap:wrap;gap:14px;justify-content:center}
+
+  /* Status bar */
+  .stat-bar{flex-wrap:wrap;gap:6px;font-size:10px;padding:5px 14px;height:auto}
+
+  /* Clock: hide to save header space */
+  #clock{display:none}
+  .hright{gap:8px}
+
+  /* Cost summary: smaller mono text on mobile */
+  #cost_summary{font-size:10px!important;line-height:1.7!important}
+
+  /* ---- Override inline grid styles via !important ----
+     Targets the 4-col cost-input grid and 3-col RUL grid
+     which have their column counts set as inline styles.      */
+  [style*="repeat(4,1fr)"]{
+    grid-template-columns:repeat(2,1fr)!important;
+    gap:10px!important
+  }
+  [style*="repeat(3,1fr)"][style*="gap:14px"]{
+    grid-template-columns:repeat(2,1fr)!important;
+    gap:10px!important
+  }
+}
+
+/* ---- Small Mobile Portrait (≤ 480px) ---- */
+@media (max-width:480px){
+  html,body{font-size:12px}
+
+  /* Compact header */
+  header{padding:6px 10px}
+  .htitle{font-size:11px}
+  .hlogo-icon{width:24px;height:24px;font-size:12px;border-radius:6px}
+
+  /* Sidebar: single column stack */
+  .sidebar{grid-template-columns:1fr}
+
+  /* KPI cards: tighter */
+  .kpi-grid{gap:5px}
+  .kpi-val{font-size:13px}
+  .kpi-lbl{font-size:9px}
+  .kpi{padding:7px 8px}
+
+  /* Tabs: even more compact */
+  .tab{font-size:9px;padding:5px 7px}
+
+  /* Grids: single column */
+  .cost-grid{grid-template-columns:1fr}
+  .fc-grid{grid-template-columns:1fr}
+  .temp-grid{grid-template-columns:repeat(2,1fr)}
+
+  /* Sensitivity rows: label wraps above track */
+  .sens-row{flex-wrap:wrap;gap:4px}
+  .sens-lbl{width:100%;font-size:10px}
+  .sens-pct{width:auto;min-width:32px}
+  .sens-val{width:auto}
+
+  /* Purity rings: slightly smaller */
+  .purity-ring{width:70px;height:70px}
+  .purity-ring-val{font-size:10px!important}
+
+  /* Cards/panels: tighter padding */
+  .card{padding:10px}
+  .panel{padding:10px}
+
+  /* Cost summary: even smaller on tiny phones */
+  #cost_summary{font-size:9px!important;line-height:1.55!important}
+
+  /* Status bar: drop institution text on tiny screens */
+  .stat-bar span:last-child{display:none}
+
+  /* Override inline grids: collapse fully on very small screens */
+  [style*="repeat(4,1fr)"]{grid-template-columns:1fr!important;gap:8px!important}
+  [style*="repeat(3,1fr)"][style*="gap:14px"]{grid-template-columns:1fr!important;gap:8px!important}
+}
