@@ -8,18 +8,14 @@
 <link rel="stylesheet" href="style.css"/>
 </head>
 <body>
-
-<div class="sim-bg"></div>
-<div class="bg-orb bg-orb1"></div>
-<div class="bg-orb bg-orb2"></div>
-<div class="bg-orb bg-orb3"></div>
-
 <div class="app">
+
 <header>
   <div class="hlogo">
     <div class="hlogo-icon">⚗</div>
-    <span class="htitle">Alkaline Electrolyzer Performance Simulation</span>
-    <span style="font-size:10px;color:var(--txt3);margin-left:4px">Alkaline Water Electrolysis</span>
+    <span class="htitle">Alkaline Electrolyzer Performance Simulation
+      <span>· Alkaline Water Electrolysis · Dept. of Mechanical Engineering</span>
+    </span>
   </div>
   <div class="hright">
     <div id="clock"></div>
@@ -55,15 +51,25 @@
   </div>
 
   <div class="card">
+    <div class="card-title">Operating Hours</div>
+    <div class="sl-group">
+      <div class="sl-row"><span class="sl-lbl">Cumulative Hours</span><span class="sl-val" id="hr_disp">4000 hr</span></div>
+      <input type="range" id="sl_hr" min="0" max="80000" step="500" value="4000" oninput="onHrSlide()">
+      <div class="sl-ends"><span>0</span><span>80 000 hr</span></div>
+    </div>
+    <div style="font-size:10px;color:var(--txt3)">Stack design life: 80 000 hr (typical alkaline)</div>
+  </div>
+
+  <div class="card">
     <div class="card-title">Voltage Breakdown</div>
     <div class="vbar" id="vbar_el"></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
       <span style="display:flex;align-items:center;gap:3px;font-size:10px;color:var(--txt3)">
-        <span style="width:8px;height:8px;border-radius:2px;background:#10b981;display:inline-block"></span>E_rev</span>
+        <span style="width:8px;height:8px;border-radius:2px;background:#059669;display:inline-block"></span>E_rev</span>
       <span style="display:flex;align-items:center;gap:3px;font-size:10px;color:var(--txt3)">
-        <span style="width:8px;height:8px;border-radius:2px;background:#ef4444;display:inline-block"></span>η_act</span>
+        <span style="width:8px;height:8px;border-radius:2px;background:#dc2626;display:inline-block"></span>η_act</span>
       <span style="display:flex;align-items:center;gap:3px;font-size:10px;color:var(--txt3)">
-        <span style="width:8px;height:8px;border-radius:2px;background:#3b82f6;display:inline-block"></span>η_ohm</span>
+        <span style="width:8px;height:8px;border-radius:2px;background:#1d4ed8;display:inline-block"></span>η_ohm</span>
     </div>
     <table class="vtbl" style="margin-top:8px">
       <tr><th>Component</th><th style="text-align:right">Value</th></tr>
@@ -73,7 +79,7 @@
       <tr><td>η_ohmic</td><td id="v_ohm">—</td></tr>
       <tr style="border-top:1px solid var(--brd2)">
         <td style="color:var(--txt1);font-weight:700">V_cell</td>
-        <td id="v_Vcell" style="color:#60a5fa;font-weight:700;text-align:right">—</td>
+        <td id="v_Vcell" style="color:var(--acc1);font-weight:700;text-align:right">—</td>
       </tr>
     </table>
   </div>
@@ -112,7 +118,6 @@
     <div class="kpi cyan"><div class="kpi-lbl">H₂ Production</div><div class="kpi-val" id="k_h2">—<span class="kpi-unit">kg/hr</span></div><div id="kb_h2"></div></div>
     <div class="kpi purple"><div class="kpi-lbl">Stack Power</div><div class="kpi-val" id="k_P">—<span class="kpi-unit">kW</span></div><div id="kb_P"></div></div>
   </div>
-  <!-- KPI ROW 2 -->
   <div class="kpi-grid" style="margin-top:-4px">
     <div class="kpi orange"><div class="kpi-lbl">SEC</div><div class="kpi-val" id="k_SEC">—<span class="kpi-unit">kWh/kg</span></div><div id="kb_SEC"></div></div>
     <div class="kpi red"><div class="kpi-lbl">Act. Overvolt.</div><div class="kpi-val" id="k_act">—<span class="kpi-unit">V</span></div></div>
@@ -127,6 +132,8 @@
     <button class="tab" onclick="showTab('ml',this)">Performance Analysis</button>
     <button class="tab" onclick="showTab('sens',this)">Sensitivity Study</button>
     <button class="tab" onclick="showTab('fc',this)">Forecasting</button>
+    <button class="tab" onclick="showTab('health',this)">Predictive Maintenance</button>
+    <button class="tab" onclick="showTab('cost',this)">Production Cost</button>
   </div>
 
   <!-- LIVE MONITOR -->
@@ -158,7 +165,7 @@
         <option value="act_ov">Y: Activation OV</option>
         <option value="ohm_ov">Y: Ohmic OV</option>
       </select>
-      <button class="btn btn-blue" onclick="runSweep()">▶ Run</button>
+      <button class="btn btn-blue" onclick="runSweep()">▶ Run Sweep</button>
     </div>
     <div class="ch-wrap" style="margin-bottom:12px"><canvas id="ch_sweep" style="max-height:240px"></canvas></div>
     <div class="ch-grid3">
@@ -172,48 +179,43 @@
   <div id="tab_ml" class="tab-pane">
     <div class="ml-grid">
       <div class="ml-card">
-        <div class="ml-title">Prediction Results</div>
-        <div style="font-size:10px;color:var(--txt3);margin-bottom:8px">Polynomial Regression Model · R²≈0.9994</div>
+        <div class="ml-title">Regression Prediction</div>
+        <div style="font-size:10px;color:var(--txt3);margin-bottom:8px">Polynomial Regression · R²≈0.9994</div>
         <div style="font-size:11px;margin-bottom:2px;color:var(--txt2)">Predicted V_cell</div>
-        <div id="ml_V" style="font-size:15px;font-weight:700;color:#60a5fa;margin-bottom:5px">—</div>
+        <div id="ml_V" style="font-size:15px;font-weight:700;color:var(--acc1);margin-bottom:5px">—</div>
         <div style="font-size:11px;margin-bottom:2px;color:var(--txt2)">Predicted Efficiency</div>
-        <div id="ml_eff" style="font-size:15px;font-weight:700;color:#34d399;margin-bottom:5px">—</div>
-        <div style="font-size:11px;margin-bottom:2px;color:var(--txt2)">Predicted H₂</div>
-        <div id="ml_h2" style="font-size:15px;font-weight:700;color:#67e8f9">—</div>
+        <div id="ml_eff" style="font-size:15px;font-weight:700;color:var(--acc3);margin-bottom:5px">—</div>
+        <div style="font-size:11px;margin-bottom:2px;color:var(--txt2)">Predicted H₂ Rate</div>
+        <div id="ml_h2" style="font-size:15px;font-weight:700;color:var(--acc2)">—</div>
       </div>
       <div class="ml-card">
         <div class="ml-title">Optimum Operating Conditions</div>
-        <div style="font-size:10px;color:var(--txt3);margin-bottom:8px">Max efficiency · Min power · Grid search 3600 pts</div>
+        <div style="font-size:10px;color:var(--txt3);margin-bottom:8px">Max efficiency · Grid search 3600 points</div>
         <button class="btn btn-green" onclick="runOpt()" style="width:100%;margin-bottom:9px">▶ Find Optimum</button>
-        <div id="opt_out" style="font-size:11px;line-height:1.9;color:var(--txt2)">Click to optimize...</div>
+        <div id="opt_out" style="font-size:11px;line-height:1.9;color:var(--txt2)">Click to run optimisation...</div>
       </div>
       <div class="ml-card">
         <div class="ml-title">Operating Status</div>
         <div id="anom_out" style="font-size:11px;line-height:2.2;color:var(--txt2)">—</div>
       </div>
     </div>
-
     <div class="card" style="margin-bottom:12px">
       <div class="card-title">Methodology</div>
       <div style="font-size:11px;color:var(--txt2);line-height:2">
-        1. Electrochemical equations were implemented from published alkaline electrolyzer studies.<br>
-        2. Voltage losses were calculated using activation and ohmic models.<br>
-        3. Hydrogen production rate was obtained using Faraday's law.<br>
-        4. Parametric studies were performed for temperature, pressure and current density.
+        1. Electrochemical equations implemented from published alkaline electrolyzer studies (LeRoy 1980, Zeng & Zhang 2010).<br>
+        2. Voltage losses computed using Butler-Volmer activation model and KOH ohmic resistance model.<br>
+        3. Hydrogen production rate obtained via Faraday's law with bubble coverage correction.<br>
+        4. Parametric studies performed over temperature (20–90°C), pressure (1–10 bar) and current density (0.05–1.0 A/cm²).
       </div>
     </div>
-
-    <div class="ai-panel">
+    <div class="panel">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <div style="font-size:11px;font-weight:700;color:#60a5fa;text-transform:uppercase;letter-spacing:1px">
-          Performance Evaluation
-        </div>
+        <div class="panel-title" style="margin-bottom:0">Performance Evaluation</div>
         <button class="btn btn-blue" id="report_btn" onclick="evaluatePerformance('')">▶ Generate Report</button>
       </div>
-      <div class="ai-out" id="report_out">Click the button to view a performance summary of the electrolyzer.</div>
+      <div class="ai-out" id="report_out">Click the button to generate a full performance report at the current operating point.</div>
       <div class="ai-row">
-        <input class="ai-inp" id="report_query"
-          placeholder="Enter an engineering query"
+        <input class="ai-inp" id="report_query" placeholder="Ask an engineering question about this electrolyzer..."
           onkeydown="if(event.key==='Enter')evaluatePerformance(this.value)"/>
         <button class="btn btn-blue" onclick="evaluatePerformance(document.getElementById('report_query').value)">Ask</button>
       </div>
@@ -230,7 +232,7 @@
   <!-- SENSITIVITY -->
   <div id="tab_sens" class="tab-pane">
     <div class="card" style="margin-bottom:12px">
-      <div class="card-title">Normalized Sensitivity — H₂ Production</div>
+      <div class="card-title">Normalised Sensitivity — H₂ Production</div>
       <div style="font-size:10px;color:var(--txt3);margin-bottom:12px">
         Sᵢ = |∂ṁH₂/∂xᵢ| · xᵢ/ṁH₂ — central finite differences at current operating point
       </div>
@@ -238,7 +240,7 @@
     </div>
     <div class="card" style="margin-bottom:12px">
       <div class="card-title">Elasticity Index Table</div>
-      <div id="sobol_table" style="font-size:11px;color:var(--txt2)"></div>
+      <div id="sobol_table"></div>
     </div>
     <div class="ch-grid3">
       <div class="ch-wrap"><div class="ch-title">H₂ vs Temperature</div><canvas id="ch_sT"></canvas></div>
@@ -250,34 +252,216 @@
   <!-- FORECAST -->
   <div id="tab_fc" class="tab-pane">
     <div class="card" style="margin-bottom:12px">
-      <div class="card-title">Production Trend</div>
+      <div class="card-title">Production Trend Forecast</div>
       <div style="font-size:10px;color:var(--txt3);margin-bottom:10px">
         ṁH₂(t) = ṁ₀ · exp(−λt) · f_T(T) · f_j(j) · [1 + ε·sin(ωt)] · [1 − δ·⌊t/t_c⌋]
       </div>
       <div class="fc-grid">
-        <div class="fc-card">
-          <div class="fc-time">At 1 Hour</div>
-          <div class="fc-val" id="fc_1h">—</div>
-          <div id="fc_1t" style="font-size:10px"></div>
-        </div>
-        <div class="fc-card">
-          <div class="fc-time">At 6 Hours</div>
-          <div class="fc-val" id="fc_6h">—</div>
-          <div id="fc_6t" style="font-size:10px"></div>
-        </div>
-        <div class="fc-card">
-          <div class="fc-time">At 24 Hours</div>
-          <div class="fc-val" id="fc_24h">—</div>
-          <div id="fc_24t" style="font-size:10px"></div>
-        </div>
+        <div class="fc-card"><div class="fc-time">At 1 Hour</div><div class="fc-val" id="fc_1h">—</div><div id="fc_1t" style="font-size:10px;color:var(--txt3)"></div></div>
+        <div class="fc-card"><div class="fc-time">At 6 Hours</div><div class="fc-val" id="fc_6h">—</div><div id="fc_6t" style="font-size:10px;color:var(--txt3)"></div></div>
+        <div class="fc-card"><div class="fc-time">At 24 Hours</div><div class="fc-val" id="fc_24h">—</div><div id="fc_24t" style="font-size:10px;color:var(--txt3)"></div></div>
       </div>
-      <div id="fc_params" style="font-size:9px;color:var(--txt3);margin-top:5px"></div>
+      <div id="fc_params" style="font-size:9px;color:var(--txt3)"></div>
     </div>
     <div class="ch-wrap">
       <div class="ch-title">24-Hour Forecast with Uncertainty Bands</div>
-      <div style="position:relative;width:100%;height:260px">
-        <canvas id="ch_fc"></canvas>
+      <div style="position:relative;width:100%;height:260px"><canvas id="ch_fc"></canvas></div>
+    </div>
+  </div>
+
+  <!-- PREDICTIVE MAINTENANCE & HEALTH -->
+  <div id="tab_health" class="tab-pane">
+
+    <!-- Health Index row -->
+    <div class="health-grid">
+      <div class="health-card">
+        <div class="health-label">Overall Stack Health</div>
+        <div class="health-score" id="hi_overall">—</div>
+        <div id="hi_overall_status" class="health-status st-good">—</div>
+        <div style="font-size:10px;color:var(--txt3);margin-top:6px">Composite index (0–100)</div>
       </div>
+      <div class="health-card">
+        <div class="health-label">Membrane Health</div>
+        <div class="health-score" id="hi_membrane">—</div>
+        <div id="hi_membrane_status" class="health-status st-good">—</div>
+        <div style="font-size:10px;color:var(--txt3);margin-top:6px">Based on ohmic resistance trend</div>
+      </div>
+      <div class="health-card">
+        <div class="health-label">Electrode Health</div>
+        <div class="health-score" id="hi_electrode">—</div>
+        <div id="hi_electrode_status" class="health-status st-good">—</div>
+        <div style="font-size:10px;color:var(--txt3);margin-top:6px">Based on activation loss trend</div>
+      </div>
+    </div>
+
+    <!-- Remaining Useful Life -->
+    <div class="panel" style="margin-bottom:12px">
+      <div class="panel-title">Remaining Useful Life (RUL)</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px">
+        <div>
+          <div style="font-size:10px;color:var(--txt3);font-weight:600;margin-bottom:4px">STACK RUL</div>
+          <div id="rul_val" style="font-size:22px;font-weight:800;color:var(--acc1)">—</div>
+          <div class="rul-bar-wrap"><div class="rul-bar-fill" id="rul_bar" style="width:0%;background:#059669">—</div></div>
+          <div id="rul_pct" style="font-size:10px;color:var(--txt3)">—</div>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--txt3);font-weight:600;margin-bottom:4px">MEMBRANE RUL</div>
+          <div id="rul_mem_val" style="font-size:22px;font-weight:800;color:var(--acc2)">—</div>
+          <div class="rul-bar-wrap"><div class="rul-bar-fill" id="rul_mem_bar" style="width:0%;background:#0891b2">—</div></div>
+          <div id="rul_mem_pct" style="font-size:10px;color:var(--txt3)">—</div>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--txt3);font-weight:600;margin-bottom:4px">ELECTRODE RUL</div>
+          <div id="rul_elec_val" style="font-size:22px;font-weight:800;color:var(--acc4)">—</div>
+          <div class="rul-bar-wrap"><div class="rul-bar-fill" id="rul_elec_bar" style="width:0%;background:#7c3aed">—</div></div>
+          <div id="rul_elec_pct" style="font-size:10px;color:var(--txt3)">—</div>
+        </div>
+      </div>
+      <div style="font-size:10px;color:var(--txt3);margin-top:8px;padding-top:8px;border-top:1px solid var(--brd)">
+        RUL model: Stack 80 000 hr · Membrane 15 000 hr · Electrode 40 000 hr · Degradation accelerated by j &gt; 0.3 A/cm², T &gt; 85°C, bubble coverage
+      </div>
+    </div>
+
+    <!-- H2 Purity & Stack Temp distribution in 2-col -->
+    <div class="ch-grid2" style="margin-bottom:12px">
+
+      <!-- H2 Purity -->
+      <div class="panel" style="margin-bottom:0">
+        <div class="panel-title">Hydrogen Purity Monitoring</div>
+        <div class="purity-ring-wrap" id="purity_rings"></div>
+        <table class="vtbl" style="margin-top:10px">
+          <tr><th>Parameter</th><th style="text-align:right">Value</th></tr>
+          <tr><td>H₂ Purity</td><td id="pur_h2">—</td></tr>
+          <tr><td>O₂ Cross-permeation</td><td id="pur_o2">—</td></tr>
+          <tr><td>H₂O Vapour Fraction</td><td id="pur_h2o">—</td></tr>
+          <tr><td>Faradaic Efficiency</td><td id="pur_far">—</td></tr>
+          <tr><td>Purity Grade</td><td id="pur_grade">—</td></tr>
+        </table>
+        <div style="font-size:9px;color:var(--txt3);margin-top:6px">
+          O₂ cross-permeation modelled from membrane thickness, differential pressure and bubble coverage.
+          H₂ purity = 1 − x_O₂ − x_H₂O (dry basis after drying assumed for grade classification).
+        </div>
+      </div>
+
+      <!-- Stack Temperature Distribution -->
+      <div class="panel" style="margin-bottom:0">
+        <div class="panel-title">Stack Temperature Distribution</div>
+        <div style="font-size:10px;color:var(--txt3);margin-bottom:8px">
+          20-cell stack · inlet–outlet gradient · Joule heating model
+        </div>
+        <div class="temp-grid" id="temp_grid"></div>
+        <div class="ch-wrap" style="margin-top:8px;padding:8px">
+          <canvas id="ch_temp" style="max-height:130px"></canvas>
+        </div>
+        <table class="vtbl" style="margin-top:8px">
+          <tr><td>Inlet Temperature</td><td id="td_in">—</td></tr>
+          <tr><td>Outlet Temperature</td><td id="td_out">—</td></tr>
+          <tr><td>Max Cell Temperature</td><td id="td_max">—</td></tr>
+          <tr><td>Temperature Rise ΔT</td><td id="td_dT">—</td></tr>
+          <tr><td>Thermal Status</td><td id="td_status">—</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- Maintenance Schedule -->
+    <div class="panel">
+      <div class="panel-title">Maintenance Schedule & Recommendations</div>
+      <div id="maint_timeline" class="maint-timeline"></div>
+    </div>
+
+  </div>
+
+  <!-- PRODUCTION COST -->
+  <div id="tab_cost" class="tab-pane">
+
+    <!-- Cost input controls -->
+    <div class="panel" style="margin-bottom:12px">
+      <div class="panel-title">Cost Input Parameters</div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px">
+        <div class="sl-group">
+          <div class="sl-row"><span class="sl-lbl">Electricity Price</span><span class="sl-val" id="ep_disp">6.0 ₹/kWh</span></div>
+          <input type="range" class="j-sl" id="sl_ep" min="1" max="20" step="0.5" value="6" oninput="onCostSlide()">
+          <div class="sl-ends"><span>1</span><span>20 ₹/kWh</span></div>
+        </div>
+        <div class="sl-group">
+          <div class="sl-row"><span class="sl-lbl">Water Price</span><span class="sl-val" id="wp_disp">5.0 ₹/L</span></div>
+          <input type="range" class="t-sl" id="sl_wp" min="1" max="50" step="1" value="5" oninput="onCostSlide()">
+          <div class="sl-ends"><span>1</span><span>50 ₹/L</span></div>
+        </div>
+        <div class="sl-group">
+          <div class="sl-row"><span class="sl-lbl">CAPEX Share</span><span class="sl-val" id="cx_disp">12.0 ₹/kg</span></div>
+          <input type="range" class="p-sl" id="sl_cx" min="2" max="50" step="1" value="12" oninput="onCostSlide()">
+          <div class="sl-ends"><span>2</span><span>50 ₹/kg</span></div>
+        </div>
+        <div class="sl-group">
+          <div class="sl-row"><span class="sl-lbl">O&M Cost</span><span class="sl-val" id="om_disp">5.0 ₹/kg</span></div>
+          <input type="range" class="j-sl" id="sl_om" min="1" max="30" step="0.5" value="5" oninput="onCostSlide()">
+          <div class="sl-ends"><span>1</span><span>30 ₹/kg</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Cost KPI cards -->
+    <div class="cost-grid">
+      <div class="cost-card">
+        <div class="cost-lbl">Electricity Cost</div>
+        <div class="cost-val" id="c_elec">—</div>
+        <div class="cost-sub">₹ per kg H₂ · SEC × electricity price</div>
+      </div>
+      <div class="cost-card">
+        <div class="cost-lbl">Water Consumption Cost</div>
+        <div class="cost-val" id="c_water">—</div>
+        <div class="cost-sub">₹ per kg H₂ · ~9 L water per kg H₂</div>
+      </div>
+      <div class="cost-card">
+        <div class="cost-lbl">Total Production Cost</div>
+        <div class="cost-val" id="c_total" style="color:#059669">—</div>
+        <div class="cost-sub">₹ per kg H₂ · all components</div>
+      </div>
+      <div class="cost-card">
+        <div class="cost-lbl">CAPEX Contribution</div>
+        <div class="cost-val" id="c_capex">—</div>
+        <div class="cost-sub">₹ per kg H₂ · amortised</div>
+      </div>
+      <div class="cost-card">
+        <div class="cost-lbl">O&M Contribution</div>
+        <div class="cost-val" id="c_om">—</div>
+        <div class="cost-sub">₹ per kg H₂ · maintenance & labour</div>
+      </div>
+      <div class="cost-card">
+        <div class="cost-lbl">USD Equivalent</div>
+        <div class="cost-val" id="c_usd">—</div>
+        <div class="cost-sub">$/kg H₂ · at 1 USD = 83.5 INR</div>
+      </div>
+    </div>
+
+    <!-- Cost breakdown chart + sensitivity -->
+    <div class="ch-grid2">
+      <div class="ch-wrap">
+        <div class="ch-title">Cost Breakdown (₹/kg H₂)</div>
+        <canvas id="ch_cost_pie" style="max-height:220px"></canvas>
+      </div>
+      <div class="ch-wrap">
+        <div class="ch-title">Cost vs Electricity Price</div>
+        <canvas id="ch_cost_ep" style="max-height:220px"></canvas>
+      </div>
+    </div>
+
+    <div class="ch-grid2" style="margin-top:10px">
+      <div class="ch-wrap">
+        <div class="ch-title">Cost vs Current Density j (A/cm²)</div>
+        <canvas id="ch_cost_j" style="max-height:200px"></canvas>
+      </div>
+      <div class="ch-wrap">
+        <div class="ch-title">Cost vs Temperature (°C)</div>
+        <canvas id="ch_cost_T" style="max-height:200px"></canvas>
+      </div>
+    </div>
+
+    <!-- Cost summary text -->
+    <div class="panel" style="margin-top:10px">
+      <div class="panel-title">Cost Analysis Summary</div>
+      <div id="cost_summary" style="font-size:12px;color:var(--txt2);line-height:1.9;white-space:pre-wrap"></div>
     </div>
   </div>
 
@@ -285,14 +469,13 @@
 </div><!-- /main -->
 
 <div class="stat-bar">
-  <span>Electrolyzer Simulation</span>
-  <span>η = E_th/V_cell × 100 · E_th = 1.48V</span>
+  <span style="font-weight:600;color:var(--acc1)">Alkaline Electrolyzer Simulation</span>
+  <span>η = E_th/V_cell × 100 · E_th = 1.48 V</span>
   <span id="st_upd">Last update: —</span>
-  <span style="margin-left:auto;color:#374151">Alkaline Electrolyzer Performance Simulation · Department of Mechanical Engineering · Academic Project 2026</span>
+  <span style="margin-left:auto;color:var(--txt3)">Department of Mechanical Engineering · PMEC Berhampur · Academic Project 2026</span>
 </div>
 
 </div><!-- /app -->
-
 <script src="script.js"></script>
 </body>
 </html>
