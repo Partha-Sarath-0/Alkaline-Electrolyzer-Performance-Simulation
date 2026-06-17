@@ -171,7 +171,7 @@ select{background:#ffffff;color:var(--txt1);
 select:hover{border-color:var(--acc1)}
 select:focus{border-color:var(--acc1);box-shadow:0 0 0 3px rgba(29,78,216,0.1)}
 
-/* Health module specific */
+/* Health module */
 .health-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px}
 .health-card{background:#ffffff;border:1px solid var(--brd);border-radius:10px;padding:14px;box-shadow:var(--shadow);text-align:center}
 .health-score{font-size:36px;font-weight:800;line-height:1;margin:8px 0}
@@ -209,26 +209,81 @@ select:focus{border-color:var(--acc1);box-shadow:0 0 0 3px rgba(29,78,216,0.1)}
 .maint-when{font-size:10px;color:var(--txt3)}
 .maint-badge{font-size:9px;padding:2px 7px;border-radius:10px;font-weight:600}
 
+/* ============================================================
+   DEGRADATION ANALYSIS — NEW STYLES
+   ============================================================ */
+
+.degrdn-panel{border:2px solid #e0e7ff;background:linear-gradient(135deg,#fafbff 0%,#f0f4ff 100%)}
+.degrdn-block{background:#ffffff;border:1px solid var(--brd);border-radius:8px;padding:12px}
+.degrdn-block-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;
+  color:var(--acc1);margin-bottom:10px;display:flex;align-items:center;gap:5px}
+.degrdn-block-title::before{content:'';width:3px;height:10px;border-radius:2px;background:linear-gradient(180deg,#7c3aed,#1d4ed8)}
+
+/* Replacement verdict card */
+.replace-verdict{display:flex;align-items:flex-start;gap:14px;border-radius:10px;padding:14px 16px;border:2px solid}
+.replace-critical{background:#fff1f2;border-color:#fca5a5}
+.replace-warn{background:#fffbeb;border-color:#fde68a}
+.replace-ok{background:#f0fdf4;border-color:#86efac}
+.replace-icon{font-size:28px;line-height:1;flex-shrink:0;margin-top:2px}
+.replace-text{flex:1}
+.replace-decision{font-size:14px;font-weight:800;letter-spacing:-0.3px;margin-bottom:6px}
+.replace-critical .replace-decision{color:#b91c1c}
+.replace-warn .replace-decision{color:#92400e}
+.replace-ok .replace-decision{color:#14532d}
+.replace-reasons{font-size:11px;color:var(--txt2);line-height:1.9}
+.replace-reason-item{margin-bottom:1px}
+
+/* Degradation master bar */
+.deg-master-bar{position:relative;height:14px;background:linear-gradient(90deg,#dcfce7,#fef9c3,#fee2e2);
+  border-radius:7px;overflow:hidden;border:1px solid var(--brd)}
+.deg-master-fill{height:14px;border-radius:7px 0 0 7px;transition:width .8s ease}
+.deg-threshold{position:absolute;top:0;bottom:0;width:2px;background:rgba(0,0,0,0.25)}
+
+/* Action list */
+.action-list{display:flex;flex-direction:column;gap:5px}
+.action-item{display:flex;align-items:flex-start;gap:8px;padding:6px 10px;
+  background:var(--bg2);border:1px solid var(--brd);border-radius:6px;font-size:11px;color:var(--txt2)}
+.action-num{display:flex;align-items:center;justify-content:center;
+  width:18px;height:18px;border-radius:50%;background:var(--acc1);
+  color:#fff;font-size:9px;font-weight:700;flex-shrink:0;margin-top:1px}
+
+/* Multi-parameter optimization result */
+.opt-result-grid{display:grid;grid-template-columns:1fr 36px 1fr;gap:0;margin-bottom:12px;
+  border:1px solid var(--brd);border-radius:10px;overflow:hidden}
+.opt-current{padding:14px;background:var(--bg2)}
+.opt-arrow{display:flex;align-items:center;justify-content:center;
+  font-size:20px;color:var(--acc1);background:#eff6ff;font-weight:700}
+.opt-optimal{padding:14px;background:#f0fdf4}
+.opt-label{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:1.2px;
+  color:var(--txt3);margin-bottom:8px}
+.opt-row{display:flex;justify-content:space-between;align-items:baseline;
+  margin-bottom:4px;padding-bottom:4px;border-bottom:1px solid var(--bg4)}
+.opt-row:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0}
+.opt-param{font-size:10px;font-weight:700;color:var(--txt3);font-family:monospace}
+.opt-val{font-size:13px;font-weight:700;color:var(--txt1)}
+.opt-delta{font-size:9px;font-weight:600;padding:1px 4px;border-radius:4px;margin-left:4px;
+  background:rgba(5,150,105,0.1);color:#059669}
+
+.opt-insight-box{background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:12px}
+.opt-insight-title{font-size:11px;font-weight:700;color:#92400e;margin-bottom:6px}
+.opt-insight-body{font-size:11px;color:var(--txt2);line-height:1.9}
+
+/* Cost summary mono */
+#cost_summary{
+  font-family:'Courier New',Courier,monospace;
+  overflow-x:auto;
+  -webkit-overflow-scrolling:touch;
+  word-break:keep-all
+}
+
 ::-webkit-scrollbar{width:5px;height:5px}
 ::-webkit-scrollbar-track{background:var(--bg2)}
 ::-webkit-scrollbar-thumb{background:var(--brd2);border-radius:3px}
 ::-webkit-scrollbar-thumb:hover{background:var(--acc1)}
 
-/* Cost Analysis Summary — monospace keeps space-aligned columns intact */
-#cost_summary{
-  font-family:'Courier New',Courier,monospace;
-  overflow-x:auto;
-  -webkit-overflow-scrolling:touch;
-  /* horizontal rule character renders at full width */
-  word-break:keep-all
-}
-
-
 /* ================================================================
-   RESPONSIVE BREAKPOINTS — No changes to visuals, layout only
+   RESPONSIVE
    ================================================================ */
-
-/* ---- Small Desktop / Large Tablet (≤ 1100px) ---- */
 @media (max-width:1100px){
   .main{grid-template-columns:210px 1fr}
   .kpi-grid{grid-template-columns:repeat(2,1fr)}
@@ -238,80 +293,30 @@ select:focus{border-color:var(--acc1);box-shadow:0 0 0 3px rgba(29,78,216,0.1)}
   .cost-grid{grid-template-columns:repeat(2,1fr)}
   .htitle span{display:none}
   .htitle{font-size:13px}
+  .opt-result-grid{grid-template-columns:1fr 28px 1fr}
 }
 
-/* ---- Tablet Portrait (≤ 900px) ---- */
 @media (max-width:900px){
   .main{grid-template-columns:185px 1fr}
   .ch-grid2{grid-template-columns:1fr}
   .fc-grid{grid-template-columns:repeat(2,1fr)}
   .kpi-val{font-size:16px}
-  /* Tabs: horizontal scroll instead of wrapping */
-  .tabs{
-    overflow-x:auto;
-    flex-wrap:nowrap;
-    -webkit-overflow-scrolling:touch;
-    scrollbar-width:none;
-    padding-bottom:2px
-  }
+  .tabs{overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding-bottom:2px}
   .tabs::-webkit-scrollbar{display:none}
   .tab{flex-shrink:0;font-size:10.5px;padding:6px 9px}
+  .opt-result-grid{grid-template-columns:1fr;grid-template-rows:auto auto auto}
+  .opt-arrow{padding:6px;transform:rotate(90deg)}
 }
 
-/* ---- Mobile Landscape / Large Phone (≤ 768px) ---- */
 @media (max-width:768px){
-  /* Allow the page to scroll freely */
   html,body{height:auto;overflow:auto}
-
-  /* App becomes a flex column so everything stacks and scrolls */
-  .app{
-    display:flex;
-    flex-direction:column;
-    height:auto;
-    min-height:100vh;
-    overflow:visible
-  }
-
-  /* Header: allow wrapping on narrow viewports */
-  header{
-    height:auto;
-    min-height:48px;
-    padding:8px 14px;
-    flex-wrap:wrap;
-    gap:6px;
-    flex-shrink:0
-  }
-
-  /* Main: sidebar on top, content below */
-  .main{
-    display:flex;
-    flex-direction:column;
-    height:auto;
-    overflow:visible;
-    flex:1
-  }
-
-  /* Sidebar: full-width 2-column card grid */
-  .sidebar{
-    overflow-y:visible;
-    border-right:none;
-    border-bottom:2px solid var(--brd);
-    padding:12px;
-    display:grid;
-    grid-template-columns:repeat(2,1fr);
-    gap:10px;
-    width:100%
-  }
+  .app{display:flex;flex-direction:column;height:auto;min-height:100vh;overflow:visible}
+  header{height:auto;min-height:48px;padding:8px 14px;flex-wrap:wrap;gap:6px;flex-shrink:0}
+  .main{display:flex;flex-direction:column;height:auto;overflow:visible;flex:1}
+  .sidebar{overflow-y:visible;border-right:none;border-bottom:2px solid var(--brd);padding:12px;
+    display:grid;grid-template-columns:repeat(2,1fr);gap:10px;width:100%}
   .sidebar .card{margin-bottom:0}
-
-  /* Content: unrestricted scroll */
-  .content{
-    overflow-y:visible;
-    padding:12px;
-    width:100%
-  }
-
-  /* Grids */
+  .content{overflow-y:visible;padding:12px;width:100%}
   .kpi-grid{grid-template-columns:repeat(2,1fr);gap:6px}
   .ch-grid3{grid-template-columns:1fr}
   .ch-grid2{grid-template-columns:1fr}
@@ -320,95 +325,46 @@ select:focus{border-color:var(--acc1);box-shadow:0 0 0 3px rgba(29,78,216,0.1)}
   .fc-grid{grid-template-columns:1fr}
   .cost-grid{grid-template-columns:repeat(2,1fr)}
   .temp-grid{grid-template-columns:repeat(3,1fr)}
-
-  /* KPI cards */
   .kpi-val{font-size:15px}
   .kpi{padding:8px 10px}
-
-  /* Tabs: always scrollable */
-  .tabs{
-    overflow-x:auto;
-    flex-wrap:nowrap;
-    -webkit-overflow-scrolling:touch;
-    scrollbar-width:none;
-    padding-bottom:2px
-  }
+  .tabs{overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding-bottom:2px}
   .tabs::-webkit-scrollbar{display:none}
   .tab{flex-shrink:0;font-size:10px;padding:6px 9px}
-
-  /* Purity rings: wrap on narrow screens */
   .purity-ring-wrap{flex-wrap:wrap;gap:14px;justify-content:center}
-
-  /* Status bar */
   .stat-bar{flex-wrap:wrap;gap:6px;font-size:10px;padding:5px 14px;height:auto}
-
-  /* Clock: hide to save header space */
   #clock{display:none}
   .hright{gap:8px}
-
-  /* Cost summary: smaller mono text on mobile */
   #cost_summary{font-size:10px!important;line-height:1.7!important}
-
-  /* ---- Override inline grid styles via !important ----
-     Targets the 4-col cost-input grid and 3-col RUL grid
-     which have their column counts set as inline styles.      */
-  [style*="repeat(4,1fr)"]{
-    grid-template-columns:repeat(2,1fr)!important;
-    gap:10px!important
-  }
-  [style*="repeat(3,1fr)"][style*="gap:14px"]{
-    grid-template-columns:repeat(2,1fr)!important;
-    gap:10px!important
-  }
+  [style*="repeat(4,1fr)"]{grid-template-columns:repeat(2,1fr)!important;gap:10px!important}
+  [style*="repeat(3,1fr)"][style*="gap:14px"]{grid-template-columns:repeat(2,1fr)!important;gap:10px!important}
+  .opt-result-grid{grid-template-columns:1fr}
+  .opt-arrow{padding:4px;transform:rotate(90deg)}
 }
 
-/* ---- Small Mobile Portrait (≤ 480px) ---- */
 @media (max-width:480px){
   html,body{font-size:12px}
-
-  /* Compact header */
   header{padding:6px 10px}
   .htitle{font-size:11px}
   .hlogo-icon{width:24px;height:24px;font-size:12px;border-radius:6px}
-
-  /* Sidebar: single column stack */
   .sidebar{grid-template-columns:1fr}
-
-  /* KPI cards: tighter */
   .kpi-grid{gap:5px}
   .kpi-val{font-size:13px}
   .kpi-lbl{font-size:9px}
   .kpi{padding:7px 8px}
-
-  /* Tabs: even more compact */
   .tab{font-size:9px;padding:5px 7px}
-
-  /* Grids: single column */
   .cost-grid{grid-template-columns:1fr}
   .fc-grid{grid-template-columns:1fr}
   .temp-grid{grid-template-columns:repeat(2,1fr)}
-
-  /* Sensitivity rows: label wraps above track */
   .sens-row{flex-wrap:wrap;gap:4px}
   .sens-lbl{width:100%;font-size:10px}
   .sens-pct{width:auto;min-width:32px}
   .sens-val{width:auto}
-
-  /* Purity rings: slightly smaller */
   .purity-ring{width:70px;height:70px}
   .purity-ring-val{font-size:10px!important}
-
-  /* Cards/panels: tighter padding */
   .card{padding:10px}
   .panel{padding:10px}
-
-  /* Cost summary: even smaller on tiny phones */
   #cost_summary{font-size:9px!important;line-height:1.55!important}
-
-  /* Status bar: drop institution text on tiny screens */
   .stat-bar span:last-child{display:none}
-
-  /* Override inline grids: collapse fully on very small screens */
   [style*="repeat(4,1fr)"]{grid-template-columns:1fr!important;gap:8px!important}
   [style*="repeat(3,1fr)"][style*="gap:14px"]{grid-template-columns:1fr!important;gap:8px!important}
 }
