@@ -294,6 +294,48 @@
       </div>
     </div>
 
+    <!-- ============================================================
+         NEW: DEGRADATION ANALYSIS PANEL
+         ============================================================ -->
+    <div class="panel degrdn-panel" style="margin-bottom:12px">
+      <div class="panel-title">🔬 Degradation Analysis &amp; Electrode Replacement Decision</div>
+
+      <!-- Verdict banner -->
+      <div id="elec_replace_verdict" style="margin-bottom:14px"></div>
+
+      <!-- Two-col: electrode + membrane breakdowns -->
+      <div class="ch-grid2" style="margin-bottom:12px">
+        <div class="degrdn-block">
+          <div class="degrdn-block-title">Electrode Degradation Breakdown</div>
+          <div id="elec_deg_breakdown"></div>
+        </div>
+        <div class="degrdn-block">
+          <div class="degrdn-block-title">Membrane Degradation Breakdown</div>
+          <div id="mem_deg_breakdown"></div>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div style="margin-bottom:14px">
+        <div class="degrdn-block-title" style="margin-bottom:6px">📋 Recommended Actions</div>
+        <div id="elec_replace_actions"></div>
+      </div>
+
+      <!-- Degradation trajectory chart -->
+      <div class="ch-wrap" style="margin-bottom:8px">
+        <div class="ch-title">Degradation Trajectory — Electrode &amp; Membrane vs Operating Hours</div>
+        <canvas id="ch_degrad_traj" style="max-height:220px"></canvas>
+      </div>
+      <div id="degrad_cur_hr" style="font-size:10px;color:var(--txt3);padding:6px 8px;background:var(--bg2);border-radius:6px;margin-bottom:12px;line-height:1.7"></div>
+
+      <!-- Multi-parameter optimization -->
+      <div class="degrdn-block-title" style="margin-bottom:8px">⚙ Multi-Parameter Degradation-Aware Optimization</div>
+      <div style="font-size:10px;color:var(--txt3);margin-bottom:8px">
+        Score = 0.7×η − 0.3×DegradPenalty · Grid search: T(55–85°C) × P(2–8 bar) × j(0.05–0.40 A/cm²) · Constraint: V_cell &lt; 2.0 V, η &gt; 70%
+      </div>
+      <div id="multi_opt_result"></div>
+    </div>
+
     <!-- Remaining Useful Life -->
     <div class="panel" style="margin-bottom:12px">
       <div class="panel-title">Remaining Useful Life (RUL)</div>
@@ -322,10 +364,8 @@
       </div>
     </div>
 
-    <!-- H2 Purity & Stack Temp distribution in 2-col -->
+    <!-- H2 Purity & Stack Temp -->
     <div class="ch-grid2" style="margin-bottom:12px">
-
-      <!-- H2 Purity -->
       <div class="panel" style="margin-bottom:0">
         <div class="panel-title">Hydrogen Purity Monitoring</div>
         <div class="purity-ring-wrap" id="purity_rings"></div>
@@ -337,22 +377,12 @@
           <tr><td>Faradaic Efficiency</td><td id="pur_far">—</td></tr>
           <tr><td>Purity Grade</td><td id="pur_grade">—</td></tr>
         </table>
-        <div style="font-size:9px;color:var(--txt3);margin-top:6px">
-          O₂ cross-permeation modelled from membrane thickness, differential pressure and bubble coverage.
-          H₂ purity = 1 − x_O₂ − x_H₂O (dry basis after drying assumed for grade classification).
-        </div>
       </div>
-
-      <!-- Stack Temperature Distribution -->
       <div class="panel" style="margin-bottom:0">
         <div class="panel-title">Stack Temperature Distribution</div>
-        <div style="font-size:10px;color:var(--txt3);margin-bottom:8px">
-          20-cell stack · inlet–outlet gradient · Joule heating model
-        </div>
+        <div style="font-size:10px;color:var(--txt3);margin-bottom:8px">20-cell stack · inlet–outlet gradient · Joule heating model</div>
         <div class="temp-grid" id="temp_grid"></div>
-        <div class="ch-wrap" style="margin-top:8px;padding:8px">
-          <canvas id="ch_temp" style="max-height:130px"></canvas>
-        </div>
+        <div class="ch-wrap" style="margin-top:8px;padding:8px"><canvas id="ch_temp" style="max-height:130px"></canvas></div>
         <table class="vtbl" style="margin-top:8px">
           <tr><td>Inlet Temperature</td><td id="td_in">—</td></tr>
           <tr><td>Outlet Temperature</td><td id="td_out">—</td></tr>
@@ -365,7 +395,7 @@
 
     <!-- Maintenance Schedule -->
     <div class="panel">
-      <div class="panel-title">Maintenance Schedule & Recommendations</div>
+      <div class="panel-title">Maintenance Schedule &amp; Recommendations</div>
       <div id="maint_timeline" class="maint-timeline"></div>
     </div>
 
@@ -373,8 +403,6 @@
 
   <!-- PRODUCTION COST -->
   <div id="tab_cost" class="tab-pane">
-
-    <!-- Cost input controls -->
     <div class="panel" style="margin-bottom:12px">
       <div class="panel-title">Cost Input Parameters</div>
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px">
@@ -394,71 +422,28 @@
           <div class="sl-ends"><span>2</span><span>50 ₹/kg</span></div>
         </div>
         <div class="sl-group">
-          <div class="sl-row"><span class="sl-lbl">O&M Cost</span><span class="sl-val" id="om_disp">5.0 ₹/kg</span></div>
+          <div class="sl-row"><span class="sl-lbl">O&amp;M Cost</span><span class="sl-val" id="om_disp">5.0 ₹/kg</span></div>
           <input type="range" class="j-sl" id="sl_om" min="1" max="30" step="0.5" value="5" oninput="onCostSlide()">
           <div class="sl-ends"><span>1</span><span>30 ₹/kg</span></div>
         </div>
       </div>
     </div>
-
-    <!-- Cost KPI cards -->
     <div class="cost-grid">
-      <div class="cost-card">
-        <div class="cost-lbl">Electricity Cost</div>
-        <div class="cost-val" id="c_elec">—</div>
-        <div class="cost-sub">₹ per kg H₂ · SEC × electricity price</div>
-      </div>
-      <div class="cost-card">
-        <div class="cost-lbl">Water Consumption Cost</div>
-        <div class="cost-val" id="c_water">—</div>
-        <div class="cost-sub">₹ per kg H₂ · ~9 L water per kg H₂</div>
-      </div>
-      <div class="cost-card">
-        <div class="cost-lbl">Total Production Cost</div>
-        <div class="cost-val" id="c_total" style="color:#059669">—</div>
-        <div class="cost-sub">₹ per kg H₂ · all components</div>
-      </div>
-      <div class="cost-card">
-        <div class="cost-lbl">CAPEX Contribution</div>
-        <div class="cost-val" id="c_capex">—</div>
-        <div class="cost-sub">₹ per kg H₂ · amortised</div>
-      </div>
-      <div class="cost-card">
-        <div class="cost-lbl">O&M Contribution</div>
-        <div class="cost-val" id="c_om">—</div>
-        <div class="cost-sub">₹ per kg H₂ · maintenance & labour</div>
-      </div>
-      <div class="cost-card">
-        <div class="cost-lbl">USD Equivalent</div>
-        <div class="cost-val" id="c_usd">—</div>
-        <div class="cost-sub">$/kg H₂ · at 1 USD = 83.5 INR</div>
-      </div>
+      <div class="cost-card"><div class="cost-lbl">Electricity Cost</div><div class="cost-val" id="c_elec">—</div><div class="cost-sub">₹ per kg H₂ · SEC × electricity price</div></div>
+      <div class="cost-card"><div class="cost-lbl">Water Consumption Cost</div><div class="cost-val" id="c_water">—</div><div class="cost-sub">₹ per kg H₂ · ~9 L water per kg H₂</div></div>
+      <div class="cost-card"><div class="cost-lbl">Total Production Cost</div><div class="cost-val" id="c_total" style="color:#059669">—</div><div class="cost-sub">₹ per kg H₂ · all components</div></div>
+      <div class="cost-card"><div class="cost-lbl">CAPEX Contribution</div><div class="cost-val" id="c_capex">—</div><div class="cost-sub">₹ per kg H₂ · amortised</div></div>
+      <div class="cost-card"><div class="cost-lbl">O&amp;M Contribution</div><div class="cost-val" id="c_om">—</div><div class="cost-sub">₹ per kg H₂ · maintenance &amp; labour</div></div>
+      <div class="cost-card"><div class="cost-lbl">USD Equivalent</div><div class="cost-val" id="c_usd">—</div><div class="cost-sub">$/kg H₂ · at 1 USD = 83.5 INR</div></div>
     </div>
-
-    <!-- Cost breakdown chart + sensitivity -->
     <div class="ch-grid2">
-      <div class="ch-wrap">
-        <div class="ch-title">Cost Breakdown (₹/kg H₂)</div>
-        <canvas id="ch_cost_pie" style="max-height:220px"></canvas>
-      </div>
-      <div class="ch-wrap">
-        <div class="ch-title">Cost vs Electricity Price</div>
-        <canvas id="ch_cost_ep" style="max-height:220px"></canvas>
-      </div>
+      <div class="ch-wrap"><div class="ch-title">Cost Breakdown (₹/kg H₂)</div><canvas id="ch_cost_pie" style="max-height:220px"></canvas></div>
+      <div class="ch-wrap"><div class="ch-title">Cost vs Electricity Price</div><canvas id="ch_cost_ep" style="max-height:220px"></canvas></div>
     </div>
-
     <div class="ch-grid2" style="margin-top:10px">
-      <div class="ch-wrap">
-        <div class="ch-title">Cost vs Current Density j (A/cm²)</div>
-        <canvas id="ch_cost_j" style="max-height:200px"></canvas>
-      </div>
-      <div class="ch-wrap">
-        <div class="ch-title">Cost vs Temperature (°C)</div>
-        <canvas id="ch_cost_T" style="max-height:200px"></canvas>
-      </div>
+      <div class="ch-wrap"><div class="ch-title">Cost vs Current Density j (A/cm²)</div><canvas id="ch_cost_j" style="max-height:200px"></canvas></div>
+      <div class="ch-wrap"><div class="ch-title">Cost vs Temperature (°C)</div><canvas id="ch_cost_T" style="max-height:200px"></canvas></div>
     </div>
-
-    <!-- Cost summary text -->
     <div class="panel" style="margin-top:10px">
       <div class="panel-title">Cost Analysis Summary</div>
       <div id="cost_summary" style="font-size:12px;color:var(--txt2);line-height:1.9;white-space:pre-wrap"></div>
@@ -470,7 +455,7 @@
 
 <div class="stat-bar">
   <span style="font-weight:600;color:var(--acc1)">Alkaline Electrolyzer Simulation</span>
-  <span>η = E_th/V_cell × 100 · E_th = 1.48 V</span>
+  <span>η = E_th/V_cell × 100 · E_th = 1.408 V (LHV basis)</span>
   <span id="st_upd">Last update: —</span>
   <span style="margin-left:auto;color:var(--txt3)">Department of Mechanical Engineering · PMEC Berhampur · Academic Project 2026</span>
 </div>
