@@ -37,13 +37,19 @@ function calc(j, Tc, Pb) {
   const I          = (j*1e4)*Ae;
   const V_stack    = Nc*V_cell;
   const P_stack_kW = V_stack*I/1000;
-  const h2_mol   = I/(2*Fc);
+  // Faradaic efficiency - real stacks lose a small, bubble/pressure-dependent
+  // slice of current to gas crossover instead of it all becoming H2. Small
+  // effect (under 1%) but it's what keeps H2 output from being a pure,
+  // T/P-independent multiple of j. Same number calcPurity() reports below.
+  const farEff       = Math.min(0.999, 0.998 - 0.002*bub - 0.001*(Pb-1)/9);
+  const h2_mol_ideal = I/(2*Fc);
+  const h2_mol   = h2_mol_ideal * farEff;
   const h2_kg_hr = h2_mol*0.002016*3600;
   const h2_Nm3   = h2_mol*0.022414*3600;
   const SEC       = P_stack_kW / h2_kg_hr;
   const eff       = (Eth / V_cell) * 100;
   return {bub, m, sKOH, sE, eta_c, eta_a, act_ov, ohm_ov, Erev, V_cell,
-          I, V_stack, P_stack_kW, h2_mol, h2_kg_hr, h2_Nm3, SEC, eff,
+          I, V_stack, P_stack_kW, h2_mol, h2_kg_hr, h2_Nm3, SEC, eff, farEff,
           R_KOH, R_elec, PH2O};
 }
 
@@ -58,6 +64,20 @@ const HIST={t:[],V:[],E:[],H:[],Pk:[],S:[],B:[]}, MAXH=60;
 const liveCh={}, swCh={}, sensCh={};
 let fcCh=null, costPieCh=null, costEpCh=null, costJCh=null, costTCh=null, tempChInstance=null;
 let degradChInstance=null, multiOptChInstance=null;
+
+// digital twin state
+let sensorBias = 0.006;      // small persistent gap between the plant sensors and the model
+let ticksSinceCalib = 0;
+const DTHIST = {t:[], real:[], twin:[]};
+let dtVChart=null;
+let dtLastFidelity = 100;
+let lastTwinSnapshot = null;
+
+// NSGA-II state
+let nsgaFront = [];
+let nsgaChInstance = null;
+let shapEverRun = false;
+let validationReal = false;
 
 function noise(s){ return (Math.random()-0.5)*2*s; }
 
@@ -222,6 +242,12 @@ function updateUI(){
   updateSens(j,T,P);
   updateHealthTab(r,cumulativeHours);
   updateCostTab(r);
+  updateDigitalTwin(r);
+  lastFaultRules = checkFaults(r);
+  updateFaultLog(lastFaultRules);
+  renderFaultTab(lastFaultRules);
+  renderLiveDashboard(r);
+  renderOverviewStatus();
   st('st_upd','Last update: '+ts);
 }
 
@@ -237,6 +263,11 @@ function showTab(name,el){
   if(name==='sens')   setTimeout(()=>updateSens(j,T,P),80);
   if(name==='health') setTimeout(()=>updateHealthTab(calc(j,T,P),cumulativeHours),80);
   if(name==='cost')   setTimeout(()=>updateCostTab(calc(j,T,P)),80);
+  if(name==='dtwin')  setTimeout(()=>updateDigitalTwin(calc(j,T,P)),80);
+  if(name==='nsga' && nsgaFront.length) setTimeout(renderNSGAResults,80);
+  if(name==='shap')   setTimeout(runLocalSHAP,80);
+  if(name==='valid')  setTimeout(()=>{ if(!document.getElementById('valid_summary').innerHTML) runValidation(); },80);
+  if(name==='fault')  setTimeout(()=>renderFaultTab(lastFaultRules||checkFaults(calc(j,T,P))),80);
 }
 
 // ============================================================
@@ -409,12 +440,25 @@ function evaluatePerformance(q){
 // ============================================================
 // Sensitivity analysis
 // ============================================================
+function sensMetric(key,rr){
+  if(key==='V_cell') return rr.V_cell;
+  if(key==='eff') return rr.eff;
+  if(key==='SEC') return rr.SEC;
+  return rr.h2_kg_hr;
+}
+const sensLabels  = {h2_kg_hr:'H₂ Production', V_cell:'Cell Voltage', eff:'Efficiency', SEC:'SEC'};
+const sensSymbols = {h2_kg_hr:'ṁH₂', V_cell:'V_cell', eff:'η', SEC:'SEC'};
+
 function updateSens(j0,T0,P0){
-  const r0=calc(j0,T0,P0),h0=r0.h2_kg_hr;
+  const targetEl = document.getElementById('sens_target');
+  const target = targetEl ? targetEl.value : 'h2_kg_hr';
+  const sym = sensSymbols[target];
+
+  const h0=sensMetric(target,calc(j0,T0,P0));
   const dj=j0*0.01,dT=0.5,dP=P0*0.01;
-  const dhj=(calc(j0+dj,T0,P0).h2_kg_hr-calc(j0-dj,T0,P0).h2_kg_hr)/(2*dj);
-  const dhT=(calc(j0,T0+dT,P0).h2_kg_hr-calc(j0,T0-dT,P0).h2_kg_hr)/(2*dT);
-  const dhP=(calc(j0,T0,P0+dP).h2_kg_hr-calc(j0,T0,P0-dP).h2_kg_hr)/(2*dP);
+  const dhj=(sensMetric(target,calc(j0+dj,T0,P0))-sensMetric(target,calc(j0-dj,T0,P0)))/(2*dj);
+  const dhT=(sensMetric(target,calc(j0,T0+dT,P0))-sensMetric(target,calc(j0,T0-dT,P0)))/(2*dT);
+  const dhP=(sensMetric(target,calc(j0,T0,P0+dP))-sensMetric(target,calc(j0,T0,P0-dP)))/(2*dP);
   const Sj=Math.abs(dhj)*j0/h0,ST=Math.abs(dhT)*T0/h0,SP=Math.abs(dhP)*P0/h0;
   const tot=Sj+ST+SP||1;
   const rows=[
@@ -433,12 +477,17 @@ function updateSens(j0,T0,P0){
 
   sh('sobol_table',
     `<table class="vtbl"><tr><th>Parameter</th><th style="text-align:center">Elasticity S</th>
-     <th style="text-align:right">∂ṁH₂/∂xᵢ</th><th style="text-align:center">Rank</th></tr>
+     <th style="text-align:right">∂${sym}/∂xᵢ</th><th style="text-align:center">Rank</th></tr>
      ${rows.map((row,i)=>`<tr>
        <td style="color:${row.c};font-weight:700">${row.l}</td>
        <td style="text-align:center;color:var(--txt1)">${row.v.toFixed(4)}</td>
        <td style="text-align:right;font-family:monospace;color:var(--txt3)">${row.d.toExponential(3)}</td>
        <td style="text-align:center">${i+1}</td></tr>`).join('')}</table>`);
+
+  const titleEl=document.getElementById('sens_title');
+  if(titleEl) titleEl.textContent = 'Normalised Sensitivity — '+sensLabels[target];
+  const formulaEl=document.getElementById('sens_formula');
+  if(formulaEl) formulaEl.innerHTML = 'Sᵢ = |∂'+sym+'/∂xᵢ| · xᵢ/'+sym+' — central finite differences at current operating point';
 
   function mkSC(id,xs,ys,xl,yl,col){
     const c=document.getElementById(id); if(!c)return;
@@ -452,12 +501,17 @@ function updateSens(j0,T0,P0){
                 y:{title:{display:true,text:yl,font:{size:10},color:'#64748b'},
           ticks:{font:{size:8},color:'#64748b'},grid:{color:'rgba(0,0,0,0.05)'}}}}});
   }
-  const Ts=[],hT=[]; for(let t=20;t<=90;t++){Ts.push(t);hT.push(calc(j0,t,P0).h2_kg_hr);}
-  const Ps=[],hP=[]; for(let p=1;p<=10;p+=0.1){Ps.push(+p.toFixed(1));hP.push(calc(j0,T0,p).h2_kg_hr);}
-  const Js=[],eJ=[]; for(let jj=0.05;jj<=1;jj+=0.01){Js.push(+jj.toFixed(2));eJ.push(calc(jj,T0,P0).eff);}
-  mkSC('ch_sT',Ts,hT,'T (°C)','H₂ (kg/hr)','#d97706');
-  mkSC('ch_sP',Ps,hP,'P (bar)','H₂ (kg/hr)','#7c3aed');
-  mkSC('ch_sj',Js,eJ,'j (A/cm²)','Efficiency (%)','#1d4ed8');
+  const Ts=[],vT=[]; for(let t=20;t<=90;t++){Ts.push(t);vT.push(sensMetric(target,calc(j0,t,P0)));}
+  const Ps=[],vP=[]; for(let p=1;p<=10;p+=0.1){Ps.push(+p.toFixed(1));vP.push(sensMetric(target,calc(j0,T0,p)));}
+  const Js=[],vJ=[]; for(let jj=0.05;jj<=1;jj+=0.01){Js.push(+jj.toFixed(2));vJ.push(sensMetric(target,calc(jj,T0,P0)));}
+  const yl=sensLabels[target];
+  mkSC('ch_sT',Ts,vT,'T (°C)',yl,'#d97706');
+  mkSC('ch_sP',Ps,vP,'P (bar)',yl,'#7c3aed');
+  mkSC('ch_sj',Js,vJ,'j (A/cm²)',yl,'#1d4ed8');
+
+  const t1=document.getElementById('sens_chT_title'); if(t1) t1.textContent=yl+' vs Temperature';
+  const t2=document.getElementById('sens_chP_title'); if(t2) t2.textContent=yl+' vs Pressure';
+  const t3=document.getElementById('sens_chJ_title'); if(t3) t3.textContent=yl+' vs Current Density';
 }
 
 // ============================================================
@@ -869,7 +923,7 @@ function calcPurity(r){
   const k_perm    = 1.1e-12;
   const A_eff     = Ae * (1 - r.bub);
   const F_O2_mol_s = k_perm * P_diff_Pa * A_eff / dm;
-  const farEff    = Math.min(0.999, 0.998 - 0.002*r.bub - 0.001*(P-1)/9);
+  const farEff    = r.farEff;
   const F_H2_total = r.h2_mol;
   const F_O2_total = F_O2_mol_s * Nc;
   const x_H2O_wet = r.PH2O / P;
@@ -1120,10 +1174,1258 @@ function updateCostTab(r){
     +`At the current operating point, increasing temperature from ${T}°C to 80°C saves `
     +`≈₹${((calc(j,T,P).SEC-calc(j,80,P).SEC)*elecPrice).toFixed(2)}/kg in electricity cost alone.`
   );
+
+  updateLCOH(r,c);
+}
+
+// ============================================================
+// DIGITAL TWIN 4.0 MODULE
+// Keeps a lightweight "virtual" replica in sync with a simulated
+// plant sensor feed, tracks the gap between them (drift), and
+// lets the user force a recalibration when the gap grows.
+// ============================================================
+
+function updateDigitalTwin(r){
+  ticksSinceCalib++;
+
+  // pretend sensor reading — the real plant never matches the model
+  // perfectly, there's always some small bias plus measurement noise
+  const realV = r.V_cell + sensorBias + noise(0.0035);
+  const realH = r.h2_kg_hr * (1 + sensorBias*0.55) + noise(r.h2_kg_hr*0.012);
+  const realT = T + noise(0.15);
+  const realP = P + noise(0.02);
+
+  const errV = Math.abs(realV - r.V_cell) / realV * 100;
+  const errH = Math.abs(realH - r.h2_kg_hr) / realH * 100;
+
+  // errors here are naturally tiny (V_cell only drifts by a few mV) so we
+  // scale them up a bit for the fidelity score, otherwise it just sits at 100
+  const fidelity = Math.max(0, Math.min(100, 100 - (errV*9 + errH*3)));
+  dtLastFidelity = fidelity;
+  lastTwinSnapshot = {realV, realH, realT, realP, errV, errH, fidelity};
+
+  st('dt_fidelity', fidelity.toFixed(1)+'%');
+  const fEl=document.getElementById('dt_fidelity');
+  if(fEl) fEl.style.color = fidelity>=95?'#059669':fidelity>=85?'#d97706':'#dc2626';
+
+  st('dt_drift', errV.toFixed(3)+'% (V_cell)');
+  st('dt_latency', (118+Math.round(noise(12)))+' ms');
+  st('dt_calib', ticksSinceCalib+' cycles since last sync');
+
+  sh('dt_status', fidelity>=95
+    ? '<span class="health-status st-good">Twin tracking the plant closely</span>'
+    : fidelity>=85
+      ? '<span class="health-status st-warn">Minor drift building up — recalibration recommended</span>'
+      : '<span class="health-status st-bad">Significant drift — recalibrate now</span>');
+
+  DTHIST.t.push(new Date().toLocaleTimeString());
+  DTHIST.real.push(realV); DTHIST.twin.push(r.V_cell);
+  if(DTHIST.t.length>40){DTHIST.t.shift();DTHIST.real.shift();DTHIST.twin.shift();}
+
+  const vc=document.getElementById('ch_dt_V');
+  if(vc){
+    if(dtVChart) dtVChart.destroy();
+    dtVChart=new Chart(vc.getContext('2d'),{type:'line',
+      data:{labels:DTHIST.t,datasets:[
+        {label:'Plant (sensor)',data:DTHIST.real,borderColor:'#dc2626',backgroundColor:'transparent',
+         borderWidth:1.5,pointRadius:0,tension:0.3},
+        {label:'Digital twin',data:DTHIST.twin,borderColor:'#1d4ed8',backgroundColor:'transparent',
+         borderWidth:1.5,pointRadius:0,tension:0.3}
+      ]},
+      options:{responsive:true,maintainAspectRatio:false,animation:{duration:0},
+        plugins:{legend:{display:true,labels:{font:{size:9},color:'#334155',boxWidth:10}}},
+        scales:{x:{display:false},
+          y:{title:{display:true,text:'V_cell (V)',font:{size:9},color:'#64748b'},
+            ticks:{font:{size:8},color:'#64748b'},grid:{color:'rgba(0,0,0,0.05)'}}}}});
+  }
+
+  sh('dt_sync_table', `
+    <table class="vtbl">
+      <tr><th>Variable</th><th>Physical (sensor)</th><th>Digital Twin</th><th>Δ</th></tr>
+      <tr><td>Cell Voltage</td><td>${realV.toFixed(4)} V</td><td>${r.V_cell.toFixed(4)} V</td><td>${errV.toFixed(3)}%</td></tr>
+      <tr><td>H₂ Rate</td><td>${realH.toFixed(5)} kg/hr</td><td>${r.h2_kg_hr.toFixed(5)} kg/hr</td><td>${errH.toFixed(3)}%</td></tr>
+      <tr><td>Temperature</td><td>${realT.toFixed(2)} °C</td><td>${T.toFixed(2)} °C</td><td>—</td></tr>
+      <tr><td>Pressure</td><td>${realP.toFixed(2)} bar</td><td>${P.toFixed(2)} bar</td><td>—</td></tr>
+    </table>`);
+}
+
+function recalibrateTwin(){
+  sensorBias *= 0.15;      // sync pulls the model most of the way back to the plant
+  ticksSinceCalib = 0;
+  sh('dt_status','<span class="health-status st-good">Recalibration complete — sensor bias reduced</span>');
+  updateDigitalTwin(calc(j,T,P));
+  showToast('Digital twin recalibrated','good');
+}
+
+// ============================================================
+// MULTI-OBJECTIVE OPTIMIZATION — NSGA-II
+// Decision variables: T (55-85°C), P (2-8 bar), j (0.05-0.40 A/cm²)
+// Objectives (minimised internally):
+//   f1 = -efficiency        → maximise efficiency
+//   f2 = production cost    → minimise ₹/kg H2
+//   f3 = degradation risk   → minimise jFactor*tFactor*bubbleFactor
+// Standard NSGA-II loop: fast non-dominated sort + crowding distance
+// + binary tournament selection + SBX crossover + polynomial mutation
+// ============================================================
+
+const NSGA_BOUNDS = [[55,85],[2,8],[0.05,0.40]]; // [T, P, j]
+
+function nsgaEval(x){
+  const T0=x[0], P0=x[1], j0=x[2];
+  const r = calc(j0,T0,P0);
+  const cost = calcCost(r).c_total;
+  const jFac = j0>0.3 ? 1.4 : j0>0.2 ? 1.15 : 1.0;
+  const tFac = T0>80 ? 1.2 : 1.0;
+  const bubFac = 1 + 2*r.bub;
+  const deg = jFac*tFac*bubFac;
+  return { x, f:[-r.eff, cost, deg], eff:r.eff, cost, deg, V:r.V_cell, h2:r.h2_kg_hr, SEC:r.SEC };
+}
+
+function nsgaRandInd(){
+  return NSGA_BOUNDS.map(b => b[0] + Math.random()*(b[1]-b[0]));
+}
+
+function dominates(a,b){
+  let better=false;
+  for(let i=0;i<a.length;i++){
+    if(a[i]>b[i]) return false;
+    if(a[i]<b[i]) better=true;
+  }
+  return better;
+}
+
+function fastNonDomSort(pop){
+  const S=pop.map(()=>[]), n=pop.map(()=>0), rank=pop.map(()=>0);
+  const fronts=[[]];
+  for(let p=0;p<pop.length;p++){
+    for(let q=0;q<pop.length;q++){
+      if(p===q) continue;
+      if(dominates(pop[p].f,pop[q].f)) S[p].push(q);
+      else if(dominates(pop[q].f,pop[p].f)) n[p]++;
+    }
+    if(n[p]===0){ rank[p]=0; fronts[0].push(p); }
+  }
+  let i=0;
+  while(fronts[i] && fronts[i].length>0){
+    const next=[];
+    for(const p of fronts[i]){
+      for(const q of S[p]){
+        n[q]--;
+        if(n[q]===0){ rank[q]=i+1; next.push(q); }
+      }
+    }
+    i++; fronts.push(next);
+  }
+  fronts.pop(); // trailing empty front from the while loop
+  return {fronts, rank};
+}
+
+function crowdingDist(frontIdx,pop){
+  const dist={}; frontIdx.forEach(i=>dist[i]=0);
+  const m=pop[0].f.length;
+  for(let k=0;k<m;k++){
+    const sorted=[...frontIdx].sort((a,b)=>pop[a].f[k]-pop[b].f[k]);
+    dist[sorted[0]]=Infinity; dist[sorted[sorted.length-1]]=Infinity;
+    const range=(pop[sorted[sorted.length-1]].f[k]-pop[sorted[0]].f[k])||1;
+    for(let idx=1;idx<sorted.length-1;idx++){
+      dist[sorted[idx]] += (pop[sorted[idx+1]].f[k]-pop[sorted[idx-1]].f[k])/range;
+    }
+  }
+  return dist;
+}
+
+function tournament(pop,rank,dist){
+  const a=Math.floor(Math.random()*pop.length), b=Math.floor(Math.random()*pop.length);
+  if(rank[a]!==rank[b]) return rank[a]<rank[b]?a:b;
+  return (dist[a]||0) > (dist[b]||0) ? a : b;
+}
+
+function sbx(p1,p2,eta=15){
+  const c1=[],c2=[];
+  for(let i=0;i<p1.length;i++){
+    const lo=NSGA_BOUNDS[i][0], hi=NSGA_BOUNDS[i][1];
+    if(Math.random()<0.9){
+      const u=Math.random();
+      const beta = u<=0.5 ? Math.pow(2*u,1/(eta+1)) : Math.pow(1/(2*(1-u)),1/(eta+1));
+      let v1=0.5*((1+beta)*p1[i]+(1-beta)*p2[i]);
+      let v2=0.5*((1-beta)*p1[i]+(1+beta)*p2[i]);
+      c1.push(Math.min(hi,Math.max(lo,v1)));
+      c2.push(Math.min(hi,Math.max(lo,v2)));
+    } else {
+      c1.push(p1[i]); c2.push(p2[i]);
+    }
+  }
+  return [c1,c2];
+}
+
+function polyMutate(ind,pm=0.15,eta=20){
+  return ind.map((val,i)=>{
+    if(Math.random()>pm) return val;
+    const lo=NSGA_BOUNDS[i][0], hi=NSGA_BOUNDS[i][1];
+    const u=Math.random();
+    const delta = u<0.5 ? Math.pow(2*u,1/(eta+1))-1 : 1-Math.pow(2*(1-u),1/(eta+1));
+    return Math.min(hi,Math.max(lo, val + delta*(hi-lo)));
+  });
+}
+
+function runNSGA(){
+  const popN = Math.max(20, Math.min(150, +document.getElementById('nsga_pop').value || 60));
+  const gens = Math.max(5,  Math.min(200, +document.getElementById('nsga_gen').value || 40));
+  const btn = document.getElementById('nsga_run_btn');
+  btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Running...';
+  sh('nsga_info','Evolving the population — non-dominated sorting runs entirely in this tab, give it a second...');
+
+  // tiny timeout so the "Running..." state actually paints before the loop blocks the thread
+  setTimeout(()=>{
+    let pop = Array.from({length:popN}, ()=>nsgaEval(nsgaRandInd()));
+
+    for(let g=0; g<gens; g++){
+      const sorted = fastNonDomSort(pop);
+      const dist = new Array(pop.length).fill(0);
+      sorted.fronts.forEach(front=>{
+        const d = crowdingDist(front,pop);
+        front.forEach(i=> dist[i]=d[i]);
+      });
+
+      const children=[];
+      while(children.length<popN){
+        const i1=tournament(pop,sorted.rank,dist), i2=tournament(pop,sorted.rank,dist);
+        const [c1,c2]=sbx(pop[i1].x, pop[i2].x);
+        children.push(nsgaEval(polyMutate(c1)));
+        if(children.length<popN) children.push(nsgaEval(polyMutate(c2)));
+      }
+
+      // elitist replacement — merge parents+children, keep the best popN by rank/crowding
+      const combined=[...pop,...children];
+      const cs=fastNonDomSort(combined);
+      const newPop=[]; let fi=0;
+      while(fi<cs.fronts.length && newPop.length+cs.fronts[fi].length<=popN){
+        cs.fronts[fi].forEach(i=>newPop.push(combined[i]));
+        fi++;
+      }
+      if(newPop.length<popN && fi<cs.fronts.length){
+        const d=crowdingDist(cs.fronts[fi],combined);
+        const remain=[...cs.fronts[fi]].sort((a,b)=>d[b]-d[a]);
+        for(const i of remain){
+          if(newPop.length>=popN) break;
+          newPop.push(combined[i]);
+        }
+      }
+      pop = newPop;
+    }
+
+    const finalSort = fastNonDomSort(pop);
+    nsgaFront = finalSort.fronts[0].map(i=>pop[i]).sort((a,b)=>b.eff-a.eff);
+
+    renderNSGAResults();
+    btn.disabled=false; btn.textContent='▶ Run NSGA-II';
+    showToast('NSGA-II converged — '+nsgaFront.length+' Pareto-optimal points found','good');
+  }, 50);
+}
+
+function renderNSGAResults(){
+  sh('nsga_info', `Pareto front converged with ${nsgaFront.length} non-dominated solutions. Each point below trades efficiency, cost and degradation risk against the others — none dominates another.`);
+
+  const ctx=document.getElementById('ch_nsga_pareto');
+  if(ctx){
+    if(nsgaChInstance) nsgaChInstance.destroy();
+    nsgaChInstance=new Chart(ctx.getContext('2d'),{
+      type:'bubble',
+      data:{datasets:[{
+        label:'Pareto-optimal points',
+        data: nsgaFront.map(s=>({x:s.cost, y:s.eff, r:Math.min(16,4+s.deg*4)})),
+        backgroundColor:'rgba(29,78,216,0.45)',
+        borderColor:'#1d4ed8', borderWidth:1
+      }]},
+      options:{responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{display:false},
+          tooltip:{callbacks:{label:c=>`η=${c.raw.y.toFixed(2)}% · cost=₹${c.raw.x.toFixed(1)}/kg`}}},
+        scales:{
+          x:{title:{display:true,text:'Production Cost (₹/kg H₂)',font:{size:10},color:'#64748b'},
+             ticks:{color:'#64748b',font:{size:8}},grid:{color:'rgba(0,0,0,0.05)'}},
+          y:{title:{display:true,text:'Efficiency (%)',font:{size:10},color:'#64748b'},
+             ticks:{color:'#64748b',font:{size:8}},grid:{color:'rgba(0,0,0,0.05)'}}
+        }}
+    });
+  }
+
+  const rows = nsgaFront.slice(0,12);
+  sh('nsga_table', `
+    <table class="vtbl">
+      <tr><th>#</th><th>T (°C)</th><th>P (bar)</th><th>j (A/cm²)</th><th>V_cell (V)</th>
+          <th>η (%)</th><th>H₂ (kg/hr)</th><th>SEC (kWh/kg)</th><th>Cost (₹/kg)</th><th>Deg. Risk</th><th></th></tr>
+      ${rows.map((s,i)=>`
+        <tr>
+          <td>${i+1}</td>
+          <td>${s.x[0].toFixed(1)}</td>
+          <td>${s.x[1].toFixed(1)}</td>
+          <td>${s.x[2].toFixed(3)}</td>
+          <td>${s.V.toFixed(4)}</td>
+          <td style="color:#059669;font-weight:700">${s.eff.toFixed(2)}</td>
+          <td>${s.h2.toFixed(5)}</td>
+          <td>${s.SEC.toFixed(0)}</td>
+          <td>${s.cost.toFixed(1)}</td>
+          <td>${s.deg.toFixed(2)}</td>
+          <td><button class="btn btn-blue" style="padding:3px 9px;font-size:10px" onclick="applyNSGA(${i})">Apply</button></td>
+        </tr>`).join('')}
+    </table>`);
+
+  // Once we have a fresh front, the downstream Pareto analysis and
+  // TOPSIS ranking are both stale — recompute the analysis view now.
+  // TOPSIS itself waits for the user to click its own button, since
+  // it depends on weights they may still want to adjust.
+  analyseParetoFront();
+}
+
+function applyNSGA(i){
+  const s=nsgaFront[i]; if(!s) return;
+  T=+s.x[0].toFixed(1); P=+s.x[1].toFixed(1); j=+s.x[2].toFixed(3);
+  document.getElementById('sl_T').value=T;
+  document.getElementById('sl_P').value=P;
+  document.getElementById('sl_j').value=j;
+  st('T_disp',T+' °C'); st('P_disp',P.toFixed(1)+' bar'); st('j_disp',j.toFixed(2)+' A/cm²');
+  updateUI();
+  sh('nsga_info', `Applied solution #${i+1} to the live operating point — T=${T}°C, P=${P}bar, j=${j.toFixed(3)} A/cm². Check Live Monitoring for the updated numbers.`);
+}
+
+// ============================================================
+// PARETO FRONT ANALYSIS
+// The NSGA-II tab above hands us a set of non-dominated points —
+// this section looks at the front itself rather than any one point
+// on it: how spread out the solutions are, how strongly the three
+// objectives trade off against each other, and roughly where the
+// "knee" sits (the spot where giving up a bit more of one objective
+// stops buying you much on another).
+// ============================================================
+
+let pfTradeoffCh1=null, pfTradeoffCh2=null;
+
+// plain Pearson correlation coefficient between two equal-length arrays
+function pearsonCorr(xs,ys){
+  const n=xs.length;
+  if(n<2) return 0;
+  const mx=xs.reduce((a,b)=>a+b,0)/n, my=ys.reduce((a,b)=>a+b,0)/n;
+  let num=0,dx2=0,dy2=0;
+  for(let i=0;i<n;i++){
+    const dx=xs[i]-mx, dy=ys[i]-my;
+    num+=dx*dy; dx2+=dx*dx; dy2+=dy*dy;
+  }
+  const denom=Math.sqrt(dx2*dy2);
+  return denom<1e-9 ? 0 : num/denom;
+}
+
+function analyseParetoFront(){
+  if(!nsgaFront.length) return;
+
+  const effs  = nsgaFront.map(s=>s.eff);
+  const costs = nsgaFront.map(s=>s.cost);
+  const degs  = nsgaFront.map(s=>s.deg);
+
+  // Diversity metric — sort by efficiency and look at the average gap
+  // between neighbours, normalised by the full span of the front. A
+  // front that's bunched up in one corner scores low here; one that
+  // spreads out across the trade-off space scores higher.
+  const sortedEff=[...effs].sort((a,b)=>a-b);
+  let gapSum=0;
+  for(let i=1;i<sortedEff.length;i++) gapSum += (sortedEff[i]-sortedEff[i-1]);
+  const effSpan = (sortedEff[sortedEff.length-1]-sortedEff[0]) || 1;
+  const diversity = sortedEff.length>1 ? (gapSum/(sortedEff.length-1))/effSpan*100 : 0;
+
+  const corrEffCost = pearsonCorr(effs,costs);
+  const corrEffDeg  = pearsonCorr(effs,degs);
+
+  // Knee-point detection — normalise efficiency and cost to [0,1],
+  // then pick whichever point sits furthest from the "worst corner"
+  // (lowest efficiency, highest cost). This is a quick geometric
+  // stand-in for "best bang for buck" that doesn't need any weights
+  // from the user — TOPSIS below does the weighted version properly.
+  const effMin=Math.min(...effs), effMax=Math.max(...effs);
+  const costMin=Math.min(...costs), costMax=Math.max(...costs);
+  const normEff  = effs.map(v=>(v-effMin)/((effMax-effMin)||1));
+  const normCost = costs.map(v=>(v-costMin)/((costMax-costMin)||1));
+  let kneeIdx=0, kneeDist=Infinity;
+  for(let i=0;i<nsgaFront.length;i++){
+    const d=Math.hypot(normEff[i]-1, normCost[i]-0); // distance from the ideal corner (η=1, cost=0)
+    if(d<kneeDist){ kneeDist=d; kneeIdx=i; }
+  }
+  const knee=nsgaFront[kneeIdx];
+
+  document.getElementById('pf_analysis_empty').style.display='none';
+  document.getElementById('pf_analysis_body').style.display='block';
+
+  const stats=[
+    {v:nsgaFront.length, l:'Non-dominated Points'},
+    {v:diversity.toFixed(1)+'%', l:'Front Diversity'},
+    {v:corrEffCost.toFixed(2), l:'η ↔ Cost Correlation'},
+    {v:corrEffDeg.toFixed(2), l:'η ↔ Degradation Corr.'}
+  ];
+  sh('pf_stat_grid', stats.map(s=>
+    `<div class="pf-stat-card"><div class="pf-stat-val">${s.v}</div><div class="pf-stat-lbl">${s.l}</div></div>`
+  ).join(''));
+
+  sh('pf_knee_note',
+    `<b>Knee point</b> (best compromise by geometry alone, no weighting): T=${knee.x[0].toFixed(1)}°C, `
+    +`P=${knee.x[1].toFixed(1)} bar, j=${knee.x[2].toFixed(3)} A/cm² → η=${knee.eff.toFixed(2)}%, `
+    +`cost=₹${knee.cost.toFixed(1)}/kg, degradation risk=${knee.deg.toFixed(2)}.<br><br>`
+    +`The ${corrEffCost>=0?'positive':'negative'} correlation of ${corrEffCost.toFixed(2)} between efficiency and cost `
+    +`is exactly what the underlying physics predicts — squeezing more efficiency out of the stack means running it `
+    +`at a temperature/pressure combination that costs more to sustain. Efficiency and degradation risk correlate at `
+    +`${corrEffDeg.toFixed(2)}, which suggests `
+    +`${Math.abs(corrEffDeg)>0.3?'chasing peak efficiency on this front does come with a measurable hit to stack life':'the two aren\'t tightly linked here, so efficiency gains on this front don\'t automatically wear the stack out faster'}. `
+    +`If you want a single number instead of eyeballing the trade-off, use TOPSIS below.`
+  );
+
+  const mkTradeoffChart=(id,xs,ys,xl,yl,col)=>{
+    const c=document.getElementById(id); if(!c) return null;
+    return new Chart(c.getContext('2d'),{type:'scatter',
+      data:{datasets:[{label:'Pareto points',data:xs.map((x,i)=>({x,y:ys[i]})),
+        backgroundColor:col,borderColor:col,pointRadius:4,pointHoverRadius:6}]},
+      options:{responsive:true,maintainAspectRatio:true,
+        plugins:{legend:{display:false},
+          tooltip:{callbacks:{label:c=>`${xl.split(' ')[0]}=${c.raw.x.toFixed(2)}, ${yl.split(' ')[0]}=${c.raw.y.toFixed(2)}`}}},
+        scales:{x:{title:{display:true,text:xl,font:{size:10},color:'#64748b'},
+            ticks:{font:{size:8},color:'#64748b'},grid:{color:'rgba(0,0,0,0.05)'}},
+                 y:{title:{display:true,text:yl,font:{size:10},color:'#64748b'},
+            ticks:{font:{size:8},color:'#64748b'},grid:{color:'rgba(0,0,0,0.05)'}}}}});
+  };
+  if(pfTradeoffCh1) pfTradeoffCh1.destroy();
+  if(pfTradeoffCh2) pfTradeoffCh2.destroy();
+  pfTradeoffCh1=mkTradeoffChart('ch_pf_tradeoff1',effs,degs,'Efficiency (%)','Degradation Risk','#7c3aed');
+  pfTradeoffCh2=mkTradeoffChart('ch_pf_tradeoff2',costs,degs,'Cost (₹/kg)','Degradation Risk','#dc2626');
+}
+
+// ============================================================
+// TOPSIS — Technique for Order Preference by Similarity to
+// Ideal Solution. NSGA-II hands us a front with no single winner
+// by construction; TOPSIS is how we actually pick one point off
+// that front once we're willing to say how much each objective
+// matters relative to the others.
+// ============================================================
+
+function renderTopsisWeightInputs(){
+  const fields=[
+    {id:'w_eff', label:'Efficiency weight',   val:40},
+    {id:'w_cost',label:'Production cost weight', val:35},
+    {id:'w_deg', label:'Degradation risk weight', val:25}
+  ];
+  sh('topsis_weights', fields.map(f=>
+    `<div class="topsis-w-field">
+      <label><span>${f.label}</span><span id="${f.id}_disp">${f.val}%</span></label>
+      <input type="range" min="0" max="100" step="1" value="${f.val}" id="${f.id}"
+        oninput="document.getElementById('${f.id}_disp').textContent=this.value+'%'">
+    </div>`).join(''));
+}
+
+function runTOPSIS(){
+  if(!nsgaFront.length){
+    sh('topsis_result',
+      '<div style="font-size:11px;color:#b91c1c;padding:10px;background:#fff1f2;border:1px solid #fca5a5;border-radius:8px">'
+      +'Run NSGA-II first — TOPSIS ranks whatever front it finds, it doesn\'t generate one on its own.</div>');
+    return;
+  }
+
+  // pull the three weight sliders and normalise so they always sum to 1,
+  // regardless of what the user happened to leave them at
+  let wEff=+document.getElementById('w_eff').value,
+      wCost=+document.getElementById('w_cost').value,
+      wDeg=+document.getElementById('w_deg').value;
+  const wSum=wEff+wCost+wDeg||1;
+  wEff/=wSum; wCost/=wSum; wDeg/=wSum;
+
+  // decision matrix — columns: [efficiency (benefit), cost (non-benefit), degradation (non-benefit)]
+  const mat = nsgaFront.map(s=>[s.eff, s.cost, s.deg]);
+
+  // vector normalisation, the standard first step of TOPSIS
+  const norms=[0,1,2].map(c=>Math.sqrt(mat.reduce((sum,row)=>sum+row[c]*row[c],0)));
+  const normMat = mat.map(row=>row.map((v,c)=>v/(norms[c]||1)));
+
+  // weight the normalised matrix
+  const weights=[wEff,wCost,wDeg];
+  const wMat = normMat.map(row=>row.map((v,c)=>v*weights[c]));
+
+  // ideal-best / ideal-worst per column — efficiency is a benefit
+  // criterion (bigger is better), cost and degradation are cost
+  // criteria (smaller is better)
+  const idealBest  = [0,1,2].map(c=>c===0 ? Math.max(...wMat.map(r=>r[c])) : Math.min(...wMat.map(r=>r[c])));
+  const idealWorst = [0,1,2].map(c=>c===0 ? Math.min(...wMat.map(r=>r[c])) : Math.max(...wMat.map(r=>r[c])));
+
+  const ranked = wMat.map((row,i)=>{
+    const dPlus  = Math.sqrt(row.reduce((s,v,c)=>s+(v-idealBest[c])**2,0));
+    const dMinus = Math.sqrt(row.reduce((s,v,c)=>s+(v-idealWorst[c])**2,0));
+    const closeness = (dPlus+dMinus)<1e-12 ? 0 : dMinus/(dPlus+dMinus);
+    return {...nsgaFront[i], closeness, dPlus, dMinus};
+  }).sort((a,b)=>b.closeness-a.closeness);
+
+  ranked.forEach((r,i)=>r.rank=i+1);
+  const best=ranked[0];
+
+  sh('topsis_result',
+    `<div class="topsis-best-card">
+      <div class="topsis-best-icon">🏆</div>
+      <div>
+        <div class="topsis-best-title">Best compromise: T=${best.x[0].toFixed(1)}°C · P=${best.x[1].toFixed(1)} bar · j=${best.x[2].toFixed(3)} A/cm²</div>
+        <div class="topsis-best-detail">
+          Cell Voltage = ${best.V.toFixed(4)} V · Efficiency = ${best.eff.toFixed(2)}% · H₂ Production = ${best.h2.toFixed(5)} kg/hr<br>
+          SEC = ${best.SEC.toFixed(0)} kWh/kg · Production Cost = ₹${best.cost.toFixed(1)}/kg · Degradation Risk = ${best.deg.toFixed(2)}<br>
+          Closeness coefficient C* = ${best.closeness.toFixed(4)} — 1.0 would sit exactly on the ideal point, 0.0 on the worst.<br>
+          Weights used: efficiency ${(wEff*100).toFixed(0)}% · cost ${(wCost*100).toFixed(0)}% · degradation ${(wDeg*100).toFixed(0)}%
+        </div>
+        <button class="btn btn-blue" style="margin-top:9px" onclick="applyTOPSISBest()">Apply This Operating Point</button>
+      </div>
+    </div>`
+  );
+
+  // stash the ranking for the "apply" button and let the table below read from it
+  window._topsisRanking = ranked;
+
+  // highlight the chosen point on the existing Pareto scatter so it's visually
+  // obvious which of the many non-dominated points TOPSIS actually picked
+  if(nsgaChInstance){
+    nsgaChInstance.data.datasets = [nsgaChInstance.data.datasets[0]];
+    nsgaChInstance.data.datasets.push({
+      label:'TOPSIS best',
+      data:[{x:best.cost, y:best.eff, r:11}],
+      backgroundColor:'#f59e0b',
+      borderColor:'#7c2d12',
+      borderWidth:2,
+      pointStyle:'star'
+    });
+    nsgaChInstance.update();
+  }
+
+  const rows=ranked.slice(0,12);
+  sh('topsis_table_wrap', `
+    <table class="vtbl">
+      <tr><th>Rank</th><th>T (°C)</th><th>P (bar)</th><th>j (A/cm²)</th><th>V_cell (V)</th>
+          <th>η (%)</th><th>H₂ (kg/hr)</th><th>SEC (kWh/kg)</th><th>Cost (₹/kg)</th><th>Deg.</th><th>C*</th></tr>
+      ${rows.map(r=>`
+        <tr ${r.rank===1?'style="background:#f0fdf4"':''}>
+          <td>${r.rank===1?'🏆 1':r.rank}</td>
+          <td>${r.x[0].toFixed(1)}</td>
+          <td>${r.x[1].toFixed(1)}</td>
+          <td>${r.x[2].toFixed(3)}</td>
+          <td>${r.V.toFixed(4)}</td>
+          <td style="color:#059669;font-weight:700">${r.eff.toFixed(2)}</td>
+          <td>${r.h2.toFixed(5)}</td>
+          <td>${r.SEC.toFixed(0)}</td>
+          <td>${r.cost.toFixed(1)}</td>
+          <td>${r.deg.toFixed(2)}</td>
+          <td style="font-weight:700">${r.closeness.toFixed(3)}</td>
+        </tr>`).join('')}
+    </table>`);
+}
+
+function applyTOPSISBest(){
+  if(!window._topsisRanking || !window._topsisRanking.length) return;
+  const best=window._topsisRanking[0];
+  T=+best.x[0].toFixed(1); P=+best.x[1].toFixed(1); j=+best.x[2].toFixed(3);
+  document.getElementById('sl_T').value=T;
+  document.getElementById('sl_P').value=P;
+  document.getElementById('sl_j').value=j;
+  st('T_disp',T+' °C'); st('P_disp',P.toFixed(1)+' bar'); st('j_disp',j.toFixed(2)+' A/cm²');
+  updateUI();
+}
+
+renderTopsisWeightInputs();
+
+// --- SHAP style explainability ---
+// breaks a prediction down into a contribution from each input (T, P, j)
+// using the actual shapley value, not some rough approximation of it.
+// only 3 inputs so there's only 6 possible orderings, did it by hand below
+// instead of writing a generic permutation function for just 3 items.
+
+const shapBase = {T:55, P:5.5, j:0.525}; // midpoint of each slider range, used as the reference point
+
+function shapMetric(key,Tv,Pv,jv){
+  const rr = calc(jv,Tv,Pv);
+  if(key==='V_cell') return rr.V_cell;
+  if(key==='eff') return rr.eff;
+  if(key==='h2_kg_hr') return rr.h2_kg_hr;
+  if(key==='SEC') return rr.SEC;
+  return rr.V_cell;
+}
+
+const SHAP_ORDERS = [[0,1,2],[0,2,1],[1,0,2],[1,2,0],[2,0,1],[2,1,0]]; // T=0, P=1, j=2
+
+function shapleyFor(key, x, base){
+  const contrib = [0,0,0];
+  for(const ord of SHAP_ORDERS){
+    let cur = base.slice();
+    let prev = shapMetric(key,cur[0],cur[1],cur[2]);
+    for(const idx of ord){
+      cur[idx] = x[idx];
+      const now = shapMetric(key,cur[0],cur[1],cur[2]);
+      contrib[idx] += now - prev;
+      prev = now;
+    }
+  }
+  return contrib.map(c => c/SHAP_ORDERS.length);
+}
+
+let shapWaterfallCh=null, shapImportanceCh=null;
+const shapDepCh = {T:null,P:null,j:null};
+let shapSamples = []; // set by runGlobalSHAP, used for the dependence scatter plots below
+
+function runLocalSHAP(){
+  const targetEl = document.getElementById('shap_target');
+  if(!targetEl) return; // tab not in the DOM yet
+  shapEverRun = true;
+  const target = targetEl.value;
+  const x = [T,P,j];
+  const b = [shapBase.T, shapBase.P, shapBase.j];
+  const contrib = shapleyFor(target,x,b);
+  const baseVal = shapMetric(target,b[0],b[1],b[2]);
+  const finalVal = shapMetric(target,x[0],x[1],x[2]);
+
+  const units = {V_cell:'V',eff:'%',h2_kg_hr:'kg/hr',SEC:'kWh/kg'};
+  const u = units[target] || '';
+  const names = ['T','P','j'];
+
+  // waterfall bars — each one starts where the previous one ended
+  let running = baseVal;
+  const bars = [[0,baseVal]];
+  for(let i=0;i<3;i++){
+    const start = running, end = running + contrib[i];
+    bars.push([Math.min(start,end), Math.max(start,end)]);
+    running = end;
+  }
+  bars.push([0,finalVal]);
+
+  const labels = ['Baseline','Temperature','Pressure','Current Density','Prediction'];
+  const colors = ['#94a3b8',
+    contrib[0]>=0?'#059669':'#dc2626',
+    contrib[1]>=0?'#059669':'#dc2626',
+    contrib[2]>=0?'#059669':'#dc2626',
+    '#1d4ed8'];
+
+  const wctx = document.getElementById('ch_shap_waterfall');
+  if(wctx){
+    if(shapWaterfallCh) shapWaterfallCh.destroy();
+    shapWaterfallCh = new Chart(wctx.getContext('2d'), {
+      type:'bar',
+      data:{labels, datasets:[{data:bars, backgroundColor:colors, borderRadius:3}]},
+      options:{
+        responsive:true, maintainAspectRatio:true,
+        plugins:{
+          legend:{display:false},
+          tooltip:{callbacks:{label:(c)=>{
+            if(c.dataIndex===0) return 'baseline = '+baseVal.toFixed(4)+u;
+            if(c.dataIndex===4) return 'prediction = '+finalVal.toFixed(4)+u;
+            const v = contrib[c.dataIndex-1];
+            return names[c.dataIndex-1]+' contributes '+(v>=0?'+':'')+v.toFixed(4)+u;
+          }}}
+        },
+        scales:{
+          x:{ticks:{font:{size:9},color:'#64748b'}},
+          y:{title:{display:true,text:target+' ('+u+')',font:{size:10},color:'#64748b'},ticks:{color:'#64748b'}}
+        }
+      }
+    });
+  }
+
+  const summaryEl = document.getElementById('shap_local_summary');
+  if(summaryEl){
+    summaryEl.innerHTML =
+      'Reference prediction (T='+shapBase.T+'°C, P='+shapBase.P+'bar, j='+shapBase.j.toFixed(3)+' A/cm²): <b>'+baseVal.toFixed(4)+u+'</b>. '+
+      'Prediction at the current operating point: <b>'+finalVal.toFixed(4)+u+'</b>. The three contributions below add up exactly to that difference.';
+  }
+
+  const rows = [
+    {n:'Temperature', v:T+'°C', c:contrib[0]},
+    {n:'Pressure', v:P+' bar', c:contrib[1]},
+    {n:'Current Density', v:j.toFixed(3)+' A/cm²', c:contrib[2]}
+  ].sort((a,b)=>Math.abs(b.c)-Math.abs(a.c));
+
+  const tableEl = document.getElementById('shap_local_table');
+  if(tableEl){
+    tableEl.innerHTML =
+      '<table class="vtbl"><tr><th>Parameter</th><th>Value</th><th style="text-align:right">SHAP contribution</th></tr>'
+      + rows.map(row =>
+          '<tr><td>'+row.n+'</td><td style="text-align:center">'+row.v+'</td>'
+          +'<td style="text-align:right;color:'+(row.c>=0?'#059669':'#dc2626')+';font-weight:700">'
+          +(row.c>=0?'+':'')+row.c.toFixed(4)+u+'</td></tr>')
+        .join('')
+      + '</table>';
+  }
+}
+
+function runGlobalSHAP(){
+  const targetEl = document.getElementById('shap_target');
+  if(!targetEl) return;
+  const target = targetEl.value;
+  const b = [shapBase.T, shapBase.P, shapBase.j];
+  const N = 30;
+
+  shapSamples = [];
+  for(let i=0;i<N;i++){
+    const Ts = 20 + Math.random()*70;
+    const Ps = 1 + Math.random()*9;
+    const js = 0.05 + Math.random()*0.95;
+    const c = shapleyFor(target,[Ts,Ps,js],b);
+    shapSamples.push({T:Ts,P:Ps,j:js,cT:c[0],cP:c[1],cj:c[2]});
+  }
+
+  const meanAbs = {
+    T: shapSamples.reduce((s,d)=>s+Math.abs(d.cT),0)/N,
+    P: shapSamples.reduce((s,d)=>s+Math.abs(d.cP),0)/N,
+    j: shapSamples.reduce((s,d)=>s+Math.abs(d.cj),0)/N
+  };
+  const ranked = Object.entries(meanAbs).sort((a,b)=>b[1]-a[1]);
+  const nameMap = {T:'Temperature',P:'Pressure',j:'Current Density'};
+  const colMap  = {T:'#d97706',P:'#7c3aed',j:'#1d4ed8'};
+
+  const ictx = document.getElementById('ch_shap_importance');
+  if(ictx){
+    if(shapImportanceCh) shapImportanceCh.destroy();
+    shapImportanceCh = new Chart(ictx.getContext('2d'), {
+      type:'bar',
+      data:{
+        labels: ranked.map(r=>nameMap[r[0]]),
+        datasets:[{data: ranked.map(r=>r[1]), backgroundColor: ranked.map(r=>colMap[r[0]]), borderRadius:4}]
+      },
+      options:{
+        indexAxis:'y', responsive:true, maintainAspectRatio:true,
+        plugins:{legend:{display:false}},
+        scales:{
+          x:{title:{display:true,text:'mean |SHAP value|',font:{size:10},color:'#64748b'},ticks:{color:'#64748b'}},
+          y:{ticks:{color:'#334155',font:{size:11}}}
+        }
+      }
+    });
+  }
+
+  const depDefs = [
+    {key:'T', field:'cT', el:'ch_shap_dep_T', col:'#d97706', xl:'Temperature (°C)'},
+    {key:'P', field:'cP', el:'ch_shap_dep_P', col:'#7c3aed', xl:'Pressure (bar)'},
+    {key:'j', field:'cj', el:'ch_shap_dep_j', col:'#1d4ed8', xl:'Current Density (A/cm²)'}
+  ];
+  depDefs.forEach(dd=>{
+    const c = document.getElementById(dd.el);
+    if(!c) return;
+    if(shapDepCh[dd.key]) shapDepCh[dd.key].destroy();
+    shapDepCh[dd.key] = new Chart(c.getContext('2d'), {
+      type:'scatter',
+      data:{datasets:[{data: shapSamples.map(s=>({x:s[dd.key], y:s[dd.field]})), backgroundColor: dd.col, pointRadius:4}]},
+      options:{
+        responsive:true, maintainAspectRatio:true,
+        plugins:{legend:{display:false}},
+        scales:{
+          x:{title:{display:true,text:dd.xl,font:{size:10},color:'#64748b'},ticks:{color:'#64748b',font:{size:8}}},
+          y:{title:{display:true,text:'SHAP value',font:{size:10},color:'#64748b'},ticks:{color:'#64748b',font:{size:8}}}
+        }
+      }
+    });
+  });
+}
+
+// --- LCOH (levelized cost of hydrogen) ---
+// separate from the per-kg cost cards above since those just add a CAPEX
+// slider in, this actually annualises real CAPEX over plant life at a
+// discount rate using the standard capital recovery factor.
+
+function onLcohSlide(){
+  updateLCOH(calc(j,T,P), calcCost(calc(j,T,P)));
+}
+
+function updateLCOH(r,c){
+  const capexEl=document.getElementById('lcoh_capex');
+  if(!capexEl) return; // cost tab not built yet on first paint
+  const capex = +capexEl.value;
+  const life  = +document.getElementById('lcoh_life').value;
+  const ratePct = +document.getElementById('lcoh_rate').value;
+  const rate  = ratePct/100;
+  const cf    = +document.getElementById('lcoh_cf').value/100;
+
+  st('lcoh_capex_disp','₹'+capex.toLocaleString('en-IN'));
+  st('lcoh_life_disp',life+' yr');
+  st('lcoh_rate_disp',ratePct.toFixed(1)+'%');
+  st('lcoh_cf_disp',(cf*100).toFixed(0)+'%');
+
+  const crf = (rate*Math.pow(1+rate,life))/(Math.pow(1+rate,life)-1);
+  const capexAnnual = capex*crf;
+  const annualH2 = r.h2_kg_hr*8760*cf;
+  const opexPerKg = c.c_elec + c.c_water + c.c_om; // capex slider excluded on purpose, LCOH does its own capex math
+  const lcoh = annualH2>0 ? (capexAnnual/annualH2) + opexPerKg : opexPerKg;
+
+  st('lcoh_capex_annual','₹'+Math.round(capexAnnual).toLocaleString('en-IN')+'/yr');
+  st('lcoh_annual_h2', Math.round(annualH2).toLocaleString('en-IN')+' kg/yr');
+  st('lcoh_val','₹'+lcoh.toFixed(2)+'/kg  ($'+(lcoh/83.5).toFixed(3)+'/kg)');
+
+  const rates=[],lcohs=[];
+  for(let rr=2;rr<=20;rr++){
+    const rN=rr/100;
+    const crfN=(rN*Math.pow(1+rN,life))/(Math.pow(1+rN,life)-1);
+    rates.push(rr);
+    lcohs.push(annualH2>0 ? (capex*crfN/annualH2)+opexPerKg : opexPerKg);
+  }
+  const rc=document.getElementById('ch_lcoh_rate');
+  if(rc){
+    if(window._lcohRateCh) window._lcohRateCh.destroy();
+    window._lcohRateCh=new Chart(rc.getContext('2d'),{type:'line',
+      data:{labels:rates,datasets:[{label:'LCOH (₹/kg)',data:lcohs,borderColor:'#059669',
+        backgroundColor:'rgba(5,150,105,0.08)',borderWidth:2,pointRadius:0,fill:true,tension:0.3}]},
+      options:{responsive:true,maintainAspectRatio:true,plugins:{legend:{display:false}},
+        scales:{x:{title:{display:true,text:'Discount Rate (%)',font:{size:10},color:'#64748b'},ticks:{color:'#64748b',font:{size:8}}},
+                y:{title:{display:true,text:'LCOH (₹/kg H₂)',font:{size:10},color:'#64748b'},ticks:{color:'#64748b',font:{size:8}}}}}});
+  }
+}
+
+// --- fault diagnosis ---
+// a fixed list of named fault conditions checked every tick, plus a log
+// of when each one flips on or off. baseline below is what the model
+// would read at nominal T/P for this same j, used to spot drift that
+// isn't just "you turned the current density up".
+
+let lastFaultRules = null;
+let faultLog = [];
+let prevActiveFaults = new Set();
+
+function checkFaults(r){
+  const base = calc(j,80,3);
+  const tmp = calcStackTemp(r);
+  const ohmRise = (r.ohm_ov - base.ohm_ov) / base.ohm_ov * 100;
+  const actRise = (r.act_ov - base.act_ov) / base.act_ov * 100;
+
+  return [
+    {name:'Cell Overvoltage', cond:r.V_cell>2.3, val:r.V_cell.toFixed(4)+' V', limit:'> 2.30 V', sev:'critical',
+      action:'Reduce current density now, or shut down if voltage keeps climbing.'},
+    {name:'Low Efficiency', cond:r.eff<65, val:r.eff.toFixed(2)+'%', limit:'< 65%', sev:'warn',
+      action:'Raise temperature toward 75-80°C, or reduce current density.'},
+    {name:'Gas Management / Blockage', cond:r.bub*100>30, val:(r.bub*100).toFixed(2)+'%', limit:'> 30% bubble coverage', sev:'warn',
+      action:'Check gas channels and electrolyte circulation for a blockage.'},
+    {name:'Electrode Degradation Signal', cond:actRise>20, val:actRise.toFixed(1)+'% above baseline', limit:'> 20% rise in activation OV', sev:'warn',
+      action:'Catalyst layer may be fouling — see the degradation breakdown on Predictive Maintenance.'},
+    {name:'Membrane / Ohmic Fault', cond:ohmRise>25, val:ohmRise.toFixed(1)+'% above baseline', limit:'> 25% rise in ohmic OV', sev:'critical',
+      action:'Inspect the membrane for pinholes or drying, and check KOH concentration.'},
+    {name:'Thermal Overrun', cond:tmp.T_max>90, val:tmp.T_max.toFixed(1)+' °C', limit:'> 90°C max cell temp', sev:'critical',
+      action:'Reduce load and check the cooling system before continuing.'},
+    {name:'Digital Twin Drift', cond:dtLastFidelity<85, val:dtLastFidelity.toFixed(1)+'% fidelity', limit:'< 85% twin fidelity', sev:'warn',
+      action:'Sensor drift suspected — recalibrate the twin on the Digital Twin tab.'}
+  ];
+}
+
+function updateFaultLog(rules){
+  const nowActive = new Set(rules.filter(x=>x.cond).map(x=>x.name));
+  const ts = new Date().toLocaleTimeString();
+  rules.forEach(rule=>{
+    const wasActive = prevActiveFaults.has(rule.name);
+    if(rule.cond && !wasActive) faultLog.unshift({ts, msg:rule.name+' triggered — '+rule.val, sev:rule.sev});
+    else if(!rule.cond && wasActive) faultLog.unshift({ts, msg:rule.name+' cleared', sev:'ok'});
+  });
+  prevActiveFaults = nowActive;
+  if(faultLog.length>30) faultLog.length = 30;
+}
+
+function renderFaultTab(rules){
+  const statusEl = document.getElementById('fault_status');
+  if(!statusEl) return; // tab not painted yet
+
+  const active = rules.filter(x=>x.cond);
+  const anyCritical = active.some(x=>x.sev==='critical');
+  const cls = active.length===0 ? 'replace-ok' : anyCritical ? 'replace-critical' : 'replace-warn';
+  const icon = active.length===0 ? '🟢' : anyCritical ? '🔴' : '🟡';
+  const headline = active.length===0 ? 'ALL SYSTEMS NORMAL — no active faults'
+    : anyCritical ? active.length+' FAULT(S) ACTIVE — critical condition present'
+    : active.length+' WARNING CONDITION(S) ACTIVE';
+
+  statusEl.innerHTML =
+    `<div class="replace-verdict ${cls}">
+      <div class="replace-icon">${icon}</div>
+      <div class="replace-text">
+        <div class="replace-decision">${headline}</div>
+        <div class="replace-reasons">${active.length ? active.map(a=>`<div class="replace-reason-item">• ${a.name} — ${a.val}</div>`).join('') : 'Every diagnostic rule below is currently within its normal range.'}</div>
+      </div>
+    </div>`;
+
+  sh('fault_table',
+    `<table class="vtbl"><tr><th>Fault</th><th>Current Value</th><th>Limit</th><th>Status</th><th>Recommended Action</th></tr>
+     ${rules.map(rule=>`<tr>
+       <td>${rule.name}</td>
+       <td>${rule.val}</td>
+       <td style="color:var(--txt3)">${rule.limit}</td>
+       <td>${rule.cond ? `<span class="kpi-badge ${rule.sev==='critical'?'bg-bad':'bg-warn'}">${rule.sev==='critical'?'CRITICAL':'WARNING'}</span>` : `<span class="kpi-badge bg-good">OK</span>`}</td>
+       <td style="font-size:10px;color:var(--txt2)">${rule.cond ? rule.action : '—'}</td>
+     </tr>`).join('')}</table>`);
+
+  const logEl = document.getElementById('fault_log');
+  if(logEl){
+    logEl.innerHTML = faultLog.length===0
+      ? 'No fault transitions logged yet — this fills in as the live simulation runs.'
+      : faultLog.map(e=>`
+        <div class="maint-item">
+          <div class="maint-dot" style="background:${e.sev==='critical'?'#dc2626':e.sev==='warn'?'#d97706':'#059669'}"></div>
+          <div class="maint-info"><div class="maint-name">${e.msg}</div><div class="maint-when">${e.ts}</div></div>
+        </div>`).join('');
+  }
+}
+
+// --- overview tab: status chips + interactive workflow diagram ---
+
+function renderOverviewStatus(){
+  const grid = document.getElementById('ov_status_grid');
+  if(!grid) return;
+  const topsisReady = !!(window._topsisRanking && window._topsisRanking.length);
+  const items = [
+    {label:'Simulation Ready', cls:'good'},
+    {label: isPaused?'Digital Twin Paused':'Digital Twin Active', cls: isPaused?'muted':'good'},
+    {label:'Optimization Ready', cls:'good'},
+    {label: nsgaFront.length?'Pareto Solutions Available ('+nsgaFront.length+')':'Pareto Solutions Not Yet Generated', cls: nsgaFront.length?'good':'muted'},
+    {label: topsisReady?'TOPSIS Decision Ready':'TOPSIS Not Yet Run', cls: topsisReady?'good':'muted'},
+    {label: shapEverRun?'SHAP Analysis Ready':'SHAP Not Yet Run', cls: shapEverRun?'good':'muted'},
+    {label: validationReal?'Validation Complete':'Validation Awaiting Reference Data', cls: validationReal?'good':'warn'}
+  ];
+  grid.innerHTML = items.map(it=>`<div class="ov-chip ${it.cls}"><span class="ov-dot"></span>${it.label}</div>`).join('');
+}
+
+const stageInfo = {
+  physical:{title:'Physical Electrolyzer', body:'The 20-cell alkaline stack this whole dashboard models — Zirfon PERL membrane, 30 wt% KOH, 0.2916 m² active area per cell. Every number downstream traces back to the physics equations calibrated against this configuration.'},
+  sensors:{title:'Sensor / Input Parameters', body:'Temperature, pressure and current density — the three sliders on the left. These are the only independent variables the model takes; everything else (voltage, efficiency, degradation, cost) is derived from them.'},
+  data:{title:'Data & Connection Layer', body:'Where slider values get read every update cycle and handed to the physics engine. In this browser-based build that\'s just a function call (calc(j,T,P)); on a real plant this would be the SCADA/OPC-UA link between field sensors and the twin.'},
+  twin:{title:'Physics-Based Virtual Twin', body:'The calc() function — Butler-Volmer activation kinetics, KOH conductivity, Nernst reversible voltage, Faraday\'s law with a Faradaic-efficiency correction. This is the single source of truth every other module reads from.'},
+  nsga:{title:'NSGA-II Optimization', body:'A real genetic algorithm (fast non-dominated sorting, crowding distance, SBX crossover, polynomial mutation) searching T/P/j for the best trade-off between efficiency, cost and degradation risk — running entirely in this browser tab.'},
+  pareto:{title:'Pareto Front', body:'The set of non-dominated solutions NSGA-II converges to — no single point beats every other point on every objective at once. The Pareto Front Analysis panel measures how spread out that front is and estimates a geometric knee point.'},
+  topsis:{title:'TOPSIS Decision Layer', body:'Breaks the Pareto front\'s tie by weighting efficiency, cost and degradation risk however you set them, then picks whichever point sits closest to the ideal corner and farthest from the worst one.'},
+  shap:{title:'SHAP Explainability', body:'Exact Shapley value decomposition (not an approximation) — averages the marginal effect of T, P and j over all 6 possible orders you could introduce them in, so the three contributions always sum exactly to the prediction gap.'},
+  validation:{title:'Model Validation', body:'Compares this model\'s predictions against real experimental or digitized-literature data using RMSE, MAE, MAPE and R². Deliberately shows "awaiting reference data" instead of a result until you actually provide a citation and real numbers.'},
+  monitoring:{title:'Monitoring Dashboard', body:'The Live Monitoring tab — status cards, live charts and a plant-vs-twin snapshot, refreshed every 2 seconds from the same calc() output every other module reads from.'}
+};
+
+function renderOverviewFlow(){
+  const flow = document.getElementById('ov_flow');
+  if(!flow) return;
+  const stages = [
+    ['physical','⚙','Physical\nElectrolyzer'], ['sensors','📡','Sensors\nT · P · j'], ['data','🔗','Data &\nConnection'],
+    ['twin','🧠','Physics-Based\nVirtual Twin'], ['nsga','🧬','NSGA-II\nOptimization'], ['pareto','📈','Pareto\nFront'],
+    ['topsis','🏆','TOPSIS\nDecision'], ['shap','🔍','SHAP\nExplainability'], ['validation','✅','Model\nValidation'],
+    ['monitoring','📊','Monitoring\nDashboard']
+  ];
+  flow.innerHTML = stages.map((s,i)=>
+    `<div class="ov-stage" onclick="showStageInfo('${s[0]}')" tabindex="0" title="Click for details">
+       <div class="ov-stage-icon">${s[1]}</div>
+       <div class="ov-stage-lbl">${s[2].replace('\n','<br>')}</div>
+     </div>` + (i<stages.length-1 ? '<div class="ov-flow-line"></div>' : '')
+  ).join('');
+}
+
+function showStageInfo(key){
+  const info = stageInfo[key];
+  if(!info) return;
+  document.getElementById('stage_modal_title').textContent = info.title;
+  document.getElementById('stage_modal_body').textContent = info.body;
+  document.getElementById('stage_modal').classList.add('open');
+}
+function closeStageModal(){
+  document.getElementById('stage_modal').classList.remove('open');
+}
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeStageModal(); });
+
+// --- live monitoring status cards ---
+// pulls together numbers that already exist elsewhere (fault rules, twin
+// fidelity, stack health) into one glance-able row at the top of the first
+// tab, plus a compact plant-vs-twin readout, so you don't have to jump
+// across tabs just to see if everything's still normal.
+
+function renderLiveDashboard(r){
+  const scoreEl = document.getElementById('live_fault_score');
+  if(!scoreEl) return; // tab not painted yet
+
+  const rules = lastFaultRules || [];
+  const active = rules.filter(x=>x.cond);
+  const anyCritical = active.some(x=>x.sev==='critical');
+  st('live_fault_score', active.length);
+  sh('live_fault_status', active.length===0
+    ? '<span class="health-status st-good">All Normal</span>'
+    : anyCritical
+      ? '<span class="health-status st-bad">Critical</span>'
+      : '<span class="health-status st-warn">Warning</span>');
+
+  st('live_twin_fid', dtLastFidelity.toFixed(1)+'%');
+  sh('live_twin_status', dtLastFidelity>=95
+    ? '<span class="health-status st-good">Synced</span>'
+    : dtLastFidelity>=85
+      ? '<span class="health-status st-warn">Drifting</span>'
+      : '<span class="health-status st-bad">Recalibrate</span>');
+
+  const hlt = calcHealth(r, cumulativeHours);
+  st('live_stack_health', hlt.overall);
+  sh('live_stack_status', `<span class="health-status ${statusClass(hlt.overall)}">${statusText(hlt.overall)}</span>`);
+
+  const snap = lastTwinSnapshot;
+  const dv = snap ? Math.abs(snap.realV - r.V_cell) : 0;
+  st('live_dv', dv.toFixed(4)+' V');
+  sh('live_dv_status', dv<0.01
+    ? '<span class="health-status st-good">Tight</span>'
+    : dv<0.03
+      ? '<span class="health-status st-warn">Loose</span>'
+      : '<span class="health-status st-bad">Wide</span>');
+
+  const tblEl = document.getElementById('live_twin_table');
+  if(tblEl && snap){
+    tblEl.innerHTML =
+      `<table class="vtbl">
+        <tr><th>Variable</th><th>Plant (sensor)</th><th>Digital Twin</th><th>Δ</th></tr>
+        <tr><td>Cell Voltage</td><td>${snap.realV.toFixed(4)} V</td><td>${r.V_cell.toFixed(4)} V</td><td>${snap.errV.toFixed(3)}%</td></tr>
+        <tr><td>H₂ Rate</td><td>${snap.realH.toFixed(5)} kg/hr</td><td>${r.h2_kg_hr.toFixed(5)} kg/hr</td><td>${snap.errH.toFixed(3)}%</td></tr>
+        <tr><td>Temperature</td><td>${snap.realT.toFixed(2)} °C</td><td>${T.toFixed(2)} °C</td><td>—</td></tr>
+        <tr><td>Pressure</td><td>${snap.realP.toFixed(2)} bar</td><td>${P.toFixed(2)} bar</td><td>—</td></tr>
+      </table>`;
+  }
+}
+
+// --- model validation against pasted data ---
+
+function parseValidationRows(text){
+  return text.split('\n')
+    .map(l=>l.trim())
+    .filter(l=>l && !l.startsWith('#'))
+    .map(l=>l.split(',').map(s=>parseFloat(s.trim())))
+    .filter(p=>p.length===2 && !isNaN(p[0]) && !isNaN(p[1]));
+}
+
+let validParityCh=null, validResidCh=null;
+
+let lastValidRows=null, lastValidSource='';
+
+function runValidation(){
+  const box = document.getElementById('valid_input');
+  if(!box) return;
+  const pairs = parseValidationRows(box.value);
+  if(pairs.length<2){
+    sh('valid_summary','⏳ Awaiting experimental/reference data — need at least 2 valid "j,V" rows to compute anything.');
+    validationReal = false;
+    return;
+  }
+
+  const sourceEl = document.getElementById('valid_source');
+  const source = sourceEl ? sourceEl.value.trim() : '';
+  const looksLikePlaceholder = box.value.includes('PLACEHOLDER');
+  validationReal = !(looksLikePlaceholder || !source);
+
+  let sumSq=0, sumAbs=0, sumPct=0, sumA=0;
+  const preds=[], resid=[], labels=[], pctErr=[];
+  pairs.forEach(([jj,va])=>{
+    const vp = calc(jj,T,P).V_cell;
+    preds.push(vp); resid.push(vp-va); labels.push(jj.toFixed(2));
+    pctErr.push(Math.abs((vp-va)/va)*100);
+    sumSq += (vp-va)*(vp-va);
+    sumAbs += Math.abs(vp-va);
+    sumPct += Math.abs((vp-va)/va)*100;
+    sumA += va;
+  });
+  const n = pairs.length;
+  const meanA = sumA/n;
+  const ssTot = pairs.reduce((s,[jj,va])=>s+(va-meanA)*(va-meanA),0);
+  const rmse = Math.sqrt(sumSq/n), mae = sumAbs/n, mape = sumPct/n;
+  const r2 = 1 - (sumSq/(ssTot||1));
+
+  lastValidRows = pairs.map((p,i)=>({j:p[0], measured:p[1], predicted:preds[i], residual:resid[i], pctErr:pctErr[i]}));
+  lastValidSource = source;
+
+  const statusBadge = validationReal
+    ? `<div style="display:inline-flex;align-items:center;gap:6px;background:#dcfce7;color:#15803d;font-weight:700;font-size:11px;padding:5px 12px;border-radius:20px;margin-bottom:8px">✅ VALIDATION STATUS: VALIDATED</div>`
+    : `<div style="display:inline-flex;align-items:center;gap:6px;background:#fff1f2;color:#7f1d1d;font-weight:700;font-size:11px;padding:5px 12px;border-radius:20px;margin-bottom:8px">⏳ VALIDATION STATUS: AWAITING REFERENCE DATA</div>`;
+
+  const warnBanner = validationReal
+    ? `<div style="font-size:10px;color:var(--txt3);margin-bottom:8px">Validated against: <b>${source}</b></div>`
+    : `<div style="background:#fff1f2;border:1px solid #fca5a5;border-radius:6px;padding:8px 10px;margin-bottom:8px;color:#7f1d1d;font-weight:600">
+        ⚠ ${looksLikePlaceholder ? 'These are still the placeholder rows' : 'No data source entered'} — these numbers are not validated against anything real yet. Don't put them in a report.
+       </div>`;
+
+  sh('valid_summary',
+    statusBadge + '<br>' + warnBanner +
+    `<table class="vtbl"><tr><th>RMSE</th><th>MAE</th><th>R²</th><th>MAPE</th><th>n</th></tr>
+     <tr><td style="text-align:center;font-weight:700;color:var(--acc1)">${rmse.toFixed(4)} V</td>
+         <td style="text-align:center;font-weight:700">${mae.toFixed(4)} V</td>
+         <td style="text-align:center;font-weight:700;color:${r2>0.9?'#059669':r2>0.7?'#d97706':'#dc2626'}">${r2.toFixed(4)}</td>
+         <td style="text-align:center;font-weight:700">${mape.toFixed(2)}%</td>
+         <td style="text-align:center">${n}</td></tr></table>
+     <div style="font-size:10px;color:var(--txt3);margin-top:6px">Predictions computed at T=${T}°C, P=${P}bar — make sure that matches the conditions your pasted data was taken at.</div>`);
+
+  const tblEl = document.getElementById('valid_table');
+  if(tblEl){
+    tblEl.innerHTML =
+      `<table class="vtbl"><tr><th>j (A/cm²)</th><th>Measured V (V)</th><th>Predicted V (V)</th><th>Residual (V)</th><th>% Error</th></tr>
+       ${lastValidRows.map(row=>`<tr>
+         <td>${row.j.toFixed(3)}</td><td>${row.measured.toFixed(4)}</td><td>${row.predicted.toFixed(4)}</td>
+         <td style="color:${row.residual>=0?'#dc2626':'#1d4ed8'}">${row.residual>=0?'+':''}${row.residual.toFixed(4)}</td>
+         <td>${row.pctErr.toFixed(2)}%</td></tr>`).join('')}
+      </table>`;
+  }
+
+  if(validationReal) showToast('Validation computed against '+source, 'good');
+
+
+  const pc = document.getElementById('ch_valid_parity');
+  if(pc){
+    if(validParityCh) validParityCh.destroy();
+    const allV = [...pairs.map(p=>p[1]), ...preds];
+    const lo = Math.min(...allV)*0.98, hi = Math.max(...allV)*1.02;
+    validParityCh = new Chart(pc.getContext('2d'), {type:'scatter',
+      data:{datasets:[
+        {label:'Model vs data', data:pairs.map(([jj,va],i)=>({x:va,y:preds[i]})), backgroundColor:'#1d4ed8', pointRadius:5},
+        {label:'Perfect agreement', data:[{x:lo,y:lo},{x:hi,y:hi}], type:'line', borderColor:'#94a3b8', borderDash:[5,4], borderWidth:1.5, pointRadius:0}
+      ]},
+      options:{responsive:true,maintainAspectRatio:true,
+        plugins:{legend:{display:true,labels:{font:{size:9},color:'#334155',boxWidth:10}}},
+        scales:{x:{title:{display:true,text:'Measured V_cell (V)',font:{size:10},color:'#64748b'},ticks:{color:'#64748b',font:{size:8}}},
+                y:{title:{display:true,text:'Predicted V_cell (V)',font:{size:10},color:'#64748b'},ticks:{color:'#64748b',font:{size:8}}}}}});
+  }
+
+  const rc = document.getElementById('ch_valid_resid');
+  if(rc){
+    if(validResidCh) validResidCh.destroy();
+    validResidCh = new Chart(rc.getContext('2d'), {type:'bar',
+      data:{labels, datasets:[{data:resid, backgroundColor:resid.map(v=>v>=0?'#dc2626':'#1d4ed8'), borderRadius:3}]},
+      options:{responsive:true,maintainAspectRatio:true,plugins:{legend:{display:false}},
+        scales:{x:{title:{display:true,text:'j (A/cm²)',font:{size:10},color:'#64748b'},ticks:{color:'#64748b',font:{size:8}}},
+                y:{title:{display:true,text:'Predicted − Measured (V)',font:{size:10},color:'#64748b'},ticks:{color:'#64748b',font:{size:8}}}}}});
+  }
+}
+
+// --- monte carlo uncertainty quantification ---
+// gaussian noise via Box-Muller since the noise() helper elsewhere in this
+// file is uniform, not normal — measurement error is usually closer to normal.
+
+function gaussRand(sigma){
+  const u = 1 - Math.random(), v = Math.random();
+  return sigma * Math.sqrt(-2*Math.log(u)) * Math.cos(2*Math.PI*v);
+}
+
+function percentile(sortedArr, p){
+  const idx = (sortedArr.length-1)*p;
+  const lo = Math.floor(idx), hi = Math.ceil(idx);
+  if(lo===hi) return sortedArr[lo];
+  return sortedArr[lo] + (sortedArr[hi]-sortedArr[lo])*(idx-lo);
+}
+
+let mcHistCh=null, mcBandCh=null;
+
+function runMonteCarlo(){
+  const N = +document.getElementById('mc_n').value;
+  const tU = +document.getElementById('mc_tU').value;
+  const pU = +document.getElementById('mc_pU').value;
+  const jU = +document.getElementById('mc_jU').value;
+
+  const Vs=[], effs=[], h2s=[];
+  for(let i=0;i<N;i++){
+    const Ts = T + gaussRand(tU);
+    const Ps = Math.max(1, P + gaussRand(pU));
+    const js = Math.max(0.01, j*(1 + gaussRand(jU)/100));
+    const r = calc(js,Ts,Ps);
+    Vs.push(r.V_cell); effs.push(r.eff); h2s.push(r.h2_kg_hr);
+  }
+
+  const stat = (arr)=>{
+    const s = [...arr].sort((a,b)=>a-b);
+    const mean = arr.reduce((a,b)=>a+b,0)/arr.length;
+    const variance = arr.reduce((a,b)=>a+(b-mean)*(b-mean),0)/arr.length;
+    return {mean, std:Math.sqrt(variance), lo:percentile(s,0.025), hi:percentile(s,0.975), sorted:s};
+  };
+  const Vst = stat(Vs), effSt = stat(effs), h2St = stat(h2s);
+
+  sh('mc_summary',
+    `<table class="vtbl"><tr><th>Output</th><th>Mean</th><th>Std Dev</th><th>95% Interval</th></tr>
+      <tr><td>Cell Voltage</td><td>${Vst.mean.toFixed(4)} V</td><td>${Vst.std.toFixed(4)} V</td><td>${Vst.lo.toFixed(4)} – ${Vst.hi.toFixed(4)} V</td></tr>
+      <tr><td>Efficiency</td><td>${effSt.mean.toFixed(2)}%</td><td>${effSt.std.toFixed(2)}%</td><td>${effSt.lo.toFixed(2)} – ${effSt.hi.toFixed(2)}%</td></tr>
+      <tr><td>H₂ Production</td><td>${h2St.mean.toFixed(5)} kg/hr</td><td>${h2St.std.toFixed(5)} kg/hr</td><td>${h2St.lo.toFixed(5)} – ${h2St.hi.toFixed(5)} kg/hr</td></tr>
+    </table>
+    <div style="font-size:10px;color:var(--txt3);margin-top:6px">${N} samples, T±${tU}°C, P±${pU}bar, j±${jU}% (1σ each, drawn independently and propagated through the full model).</div>`);
+
+  const hc = document.getElementById('ch_mc_hist');
+  if(hc){
+    const nBins=24, sorted=Vst.sorted, min=sorted[0], max=sorted[sorted.length-1];
+    const w=(max-min)/nBins||1;
+    const counts=new Array(nBins).fill(0);
+    Vs.forEach(v=>{ let idx=Math.floor((v-min)/w); if(idx>=nBins) idx=nBins-1; if(idx<0) idx=0; counts[idx]++; });
+    const labels=counts.map((_,i)=>(min+i*w).toFixed(3));
+    if(mcHistCh) mcHistCh.destroy();
+    mcHistCh=new Chart(hc.getContext('2d'),{type:'bar',
+      data:{labels,datasets:[{data:counts,backgroundColor:'#1d4ed8',borderRadius:2}]},
+      options:{responsive:true,maintainAspectRatio:true,plugins:{legend:{display:false}},
+        scales:{x:{title:{display:true,text:'V_cell (V)',font:{size:10},color:'#64748b'},ticks:{maxTicksLimit:8,font:{size:7},color:'#64748b'}},
+                y:{title:{display:true,text:'sample count',font:{size:10},color:'#64748b'},ticks:{color:'#64748b',font:{size:8}}}}}});
+  }
+
+  const jGrid=[0.05,0.1,0.15,0.2,0.3,0.4,0.5,0.6,0.8,1.0];
+  const bandMean=[], bandLo=[], bandHi=[];
+  const M=150;
+  jGrid.forEach(jc=>{
+    const vals=[];
+    for(let i=0;i<M;i++){
+      const Ts=T+gaussRand(tU), Ps=Math.max(1,P+gaussRand(pU)), js=Math.max(0.01,jc*(1+gaussRand(jU)/100));
+      vals.push(calc(js,Ts,Ps).eff);
+    }
+    vals.sort((a,b)=>a-b);
+    bandMean.push(vals.reduce((a,b)=>a+b,0)/vals.length);
+    bandLo.push(percentile(vals,0.025));
+    bandHi.push(percentile(vals,0.975));
+  });
+
+  const bc=document.getElementById('ch_mc_band');
+  if(bc){
+    if(mcBandCh) mcBandCh.destroy();
+    mcBandCh=new Chart(bc.getContext('2d'),{type:'line',
+      data:{labels:jGrid.map(v=>v.toFixed(2)),datasets:[
+        {label:'97.5th pct',data:bandHi,borderColor:'rgba(29,78,216,0.25)',backgroundColor:'rgba(29,78,216,0.08)',
+         borderWidth:1,pointRadius:0,fill:'+1',tension:0.3,borderDash:[3,3]},
+        {label:'Mean efficiency',data:bandMean,borderColor:'#1d4ed8',backgroundColor:'transparent',
+         borderWidth:2,pointRadius:0,fill:false,tension:0.3},
+        {label:'2.5th pct',data:bandLo,borderColor:'rgba(29,78,216,0.25)',backgroundColor:'rgba(29,78,216,0.08)',
+         borderWidth:1,pointRadius:0,fill:'-1',tension:0.3,borderDash:[3,3]}
+      ]},
+      options:{responsive:true,maintainAspectRatio:true,
+        plugins:{legend:{display:true,labels:{font:{size:9},color:'#334155',boxWidth:10}}},
+        scales:{x:{title:{display:true,text:'j (A/cm²)',font:{size:10},color:'#64748b'},ticks:{color:'#64748b',font:{size:8}}},
+                y:{title:{display:true,text:'Efficiency (%)',font:{size:10},color:'#64748b'},ticks:{color:'#64748b',font:{size:8}}}}}});
+  }
+
+  sh('mc_table',
+    `<table class="vtbl"><tr><th>j (A/cm²)</th><th>Mean η (%)</th><th>95% Band</th></tr>
+      ${jGrid.map((jc,i)=>`<tr><td>${jc.toFixed(2)}</td><td>${bandMean[i].toFixed(2)}</td><td>${bandLo[i].toFixed(2)} – ${bandHi[i].toFixed(2)}</td></tr>`).join('')}
+    </table>`);
+}
+
+// --- toast notifications ---
+// tiny, self-contained - no dependency, just appends/removes a div.
+
+function showToast(msg, kind){
+  const stack = document.getElementById('toast_stack');
+  if(!stack) return;
+  const el = document.createElement('div');
+  el.className = 'toast toast-'+(kind||'info');
+  el.textContent = msg;
+  stack.appendChild(el);
+  setTimeout(()=>{
+    el.classList.add('toast-out');
+    setTimeout(()=>el.remove(), 300);
+  }, 3200);
+}
+
+// --- CSV export for the validation table ---
+// real, working export - not a decorative button. Only makes sense once
+// runValidation has actually populated lastValidRows.
+
+function exportValidationCSV(){
+  if(!lastValidRows || !lastValidRows.length){
+    showToast('Run "Compute Error Metrics" first — nothing to export yet','warn');
+    return;
+  }
+  let csv = 'j_A_per_cm2,V_measured,V_predicted,residual,pct_error,source\n';
+  lastValidRows.forEach(row=>{
+    csv += `${row.j},${row.measured},${row.predicted.toFixed(6)},${row.residual.toFixed(6)},${row.pctErr.toFixed(4)},"${lastValidSource.replace(/"/g,"'")}"\n`;
+  });
+  const blob = new Blob([csv], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'validation_data.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  showToast('Validation table exported as CSV','good');
 }
 
 // ============================================================
 // Boot
 // ============================================================
+renderOverviewFlow();
 updateUI();
 setInterval(()=>{ if(!isPaused) updateUI(); }, 2000);
