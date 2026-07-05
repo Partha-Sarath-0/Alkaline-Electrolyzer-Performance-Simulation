@@ -127,17 +127,74 @@
 
   <!-- TABS -->
   <div class="tabs">
-    <button class="tab active" onclick="showTab('live',this)">Live Monitoring</button>
+    <button class="tab active" onclick="showTab('overview',this)">Overview</button>
+    <button class="tab" onclick="showTab('live',this)">Live Monitoring</button>
     <button class="tab" onclick="showTab('sweep',this)">Parametric Study</button>
     <button class="tab" onclick="showTab('ml',this)">Performance Analysis</button>
     <button class="tab" onclick="showTab('sens',this)">Sensitivity Study</button>
     <button class="tab" onclick="showTab('fc',this)">Forecasting</button>
     <button class="tab" onclick="showTab('health',this)">Predictive Maintenance</button>
     <button class="tab" onclick="showTab('cost',this)">Production Cost</button>
+    <button class="tab" onclick="showTab('dtwin',this)">Digital Twin</button>
+    <button class="tab" onclick="showTab('nsga',this)">Multi-Obj Optimization</button>
+    <button class="tab" onclick="showTab('shap',this)">SHAP Explainability</button>
+    <button class="tab" onclick="showTab('valid',this)">Validation &amp; UQ</button>
+    <button class="tab" onclick="showTab('fault',this)">Fault Diagnosis</button>
   </div>
 
   <!-- LIVE MONITOR -->
-  <div id="tab_live" class="tab-pane active">
+  <!-- OVERVIEW / DIGITAL TWIN WORKFLOW -->
+  <div id="tab_overview" class="tab-pane active">
+    <div class="panel" style="margin-bottom:12px">
+      <div class="panel-title">System Status</div>
+      <div style="font-size:11px;color:var(--txt2);margin-bottom:12px">Live status of every module in this dashboard — these reflect actual computed state, not fixed labels.</div>
+      <div id="ov_status_grid" class="ov-status-grid"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Digital Twin Workflow</div>
+      <div style="font-size:11px;color:var(--txt2);margin-bottom:14px">
+        How data actually moves through this platform, from the physical stack to the decision layer. Click any stage
+        for a short technical note on what it does here specifically.
+      </div>
+      <div class="ov-flow" id="ov_flow"></div>
+    </div>
+  </div>
+
+  <div id="tab_live" class="tab-pane">
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px" id="live_status_grid">
+      <div class="health-card">
+        <div class="health-label">System Status</div>
+        <div class="health-score" id="live_fault_score" style="font-size:26px">—</div>
+        <div id="live_fault_status" class="health-status st-good">—</div>
+        <div style="font-size:9px;color:var(--txt3);margin-top:6px">active faults right now</div>
+      </div>
+      <div class="health-card">
+        <div class="health-label">Digital Twin Fidelity</div>
+        <div class="health-score" id="live_twin_fid">—</div>
+        <div id="live_twin_status" class="health-status st-good">—</div>
+        <div style="font-size:9px;color:var(--txt3);margin-top:6px">plant vs model agreement</div>
+      </div>
+      <div class="health-card">
+        <div class="health-label">Stack Health</div>
+        <div class="health-score" id="live_stack_health" style="font-size:26px">—</div>
+        <div id="live_stack_status" class="health-status st-good">—</div>
+        <div style="font-size:9px;color:var(--txt3);margin-top:6px">composite index, 0-100</div>
+      </div>
+      <div class="health-card">
+        <div class="health-label">Plant ↔ Twin ΔV</div>
+        <div class="health-score" id="live_dv" style="font-size:20px">—</div>
+        <div id="live_dv_status" class="health-status st-good">—</div>
+        <div style="font-size:9px;color:var(--txt3);margin-top:6px">sensor vs model gap</div>
+      </div>
+    </div>
+
+    <div class="ch-wrap" style="margin-bottom:12px">
+      <div class="ch-title">Plant Sensors vs Digital Twin — Live Snapshot</div>
+      <div id="live_twin_table">Waiting for first update cycle...</div>
+      <div style="font-size:10px;color:var(--txt3);margin-top:6px">Full history and manual recalibration live on the Digital Twin tab — this is just the current-second readout.</div>
+    </div>
+
     <div class="ch-grid3">
       <div class="ch-wrap"><div class="ch-title">Cell Voltage (V)</div><canvas id="ch_V"></canvas></div>
       <div class="ch-wrap"><div class="ch-title">Efficiency (%)</div><canvas id="ch_E"></canvas></div>
@@ -232,9 +289,22 @@
   <!-- SENSITIVITY -->
   <div id="tab_sens" class="tab-pane">
     <div class="card" style="margin-bottom:12px">
-      <div class="card-title">Normalised Sensitivity — H₂ Production</div>
-      <div style="font-size:10px;color:var(--txt3);margin-bottom:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px">
+        <div class="card-title" id="sens_title" style="margin-bottom:0">Normalised Sensitivity — H₂ Production</div>
+        <select id="sens_target" onchange="updateSens(j,T,P)">
+          <option value="h2_kg_hr">Target: H₂ Production</option>
+          <option value="V_cell">Target: Cell Voltage</option>
+          <option value="eff">Target: Efficiency</option>
+          <option value="SEC">Target: SEC</option>
+        </select>
+      </div>
+      <div style="font-size:10px;color:var(--txt3);margin-bottom:8px" id="sens_formula">
         Sᵢ = |∂ṁH₂/∂xᵢ| · xᵢ/ṁH₂ — central finite differences at current operating point
+      </div>
+      <div style="font-size:10px;color:var(--txt3);margin-bottom:12px">
+        Note: H₂ production is set almost entirely by current density (Faraday's law), so that target alone will
+        always show j near 100% — that's real electrochemistry, not a bug. Switch to Voltage, Efficiency or SEC
+        above to see temperature and pressure actually carry meaningful weight.
       </div>
       <div id="sens_bars"></div>
     </div>
@@ -243,9 +313,9 @@
       <div id="sobol_table"></div>
     </div>
     <div class="ch-grid3">
-      <div class="ch-wrap"><div class="ch-title">H₂ vs Temperature</div><canvas id="ch_sT"></canvas></div>
-      <div class="ch-wrap"><div class="ch-title">H₂ vs Pressure</div><canvas id="ch_sP"></canvas></div>
-      <div class="ch-wrap"><div class="ch-title">Efficiency vs j</div><canvas id="ch_sj"></canvas></div>
+      <div class="ch-wrap"><div class="ch-title" id="sens_chT_title">H₂ vs Temperature</div><canvas id="ch_sT"></canvas></div>
+      <div class="ch-wrap"><div class="ch-title" id="sens_chP_title">H₂ vs Pressure</div><canvas id="ch_sP"></canvas></div>
+      <div class="ch-wrap"><div class="ch-title" id="sens_chJ_title">H₂ vs Current Density</div><canvas id="ch_sj"></canvas></div>
     </div>
   </div>
 
@@ -295,7 +365,7 @@
     </div>
 
     <!-- ============================================================
-         NEW: DEGRADATION ANALYSIS PANEL
+         DEGRADATION ANALYSIS PANEL
          ============================================================ -->
     <div class="panel degrdn-panel" style="margin-bottom:12px">
       <div class="panel-title">🔬 Degradation Analysis &amp; Electrode Replacement Decision</div>
@@ -448,6 +518,293 @@
       <div class="panel-title">Cost Analysis Summary</div>
       <div id="cost_summary" style="font-size:12px;color:var(--txt2);line-height:1.9;white-space:pre-wrap"></div>
     </div>
+
+    <div class="panel" style="margin-top:10px">
+      <div class="panel-title">Levelized Cost of Hydrogen (LCOH)</div>
+      <div style="font-size:11px;color:var(--txt2);margin-bottom:12px">
+        The cost cards above only add up the per-kg CAPEX share you set on a slider. LCOH does the full lifecycle math instead —
+        it spreads the actual plant CAPEX over its lifetime using a capital recovery factor at a given discount rate, divides by
+        how much H₂ the plant actually makes at a realistic capacity factor, and adds that to the running electricity/water/O&amp;M
+        cost. This is the number normally quoted when comparing hydrogen production routes.
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:12px">
+        <div class="sl-group">
+          <div class="sl-row"><span class="sl-lbl">Total CAPEX</span><span class="sl-val" id="lcoh_capex_disp">₹5,00,00,000</span></div>
+          <input type="range" class="p-sl" id="lcoh_capex" min="1000000" max="200000000" step="500000" value="50000000" oninput="onLcohSlide()">
+          <div class="sl-ends"><span>₹10L</span><span>₹20Cr</span></div>
+        </div>
+        <div class="sl-group">
+          <div class="sl-row"><span class="sl-lbl">Plant Lifetime</span><span class="sl-val" id="lcoh_life_disp">20 yr</span></div>
+          <input type="range" class="t-sl" id="lcoh_life" min="5" max="30" step="1" value="20" oninput="onLcohSlide()">
+          <div class="sl-ends"><span>5 yr</span><span>30 yr</span></div>
+        </div>
+        <div class="sl-group">
+          <div class="sl-row"><span class="sl-lbl">Discount Rate</span><span class="sl-val" id="lcoh_rate_disp">8.0%</span></div>
+          <input type="range" class="j-sl" id="lcoh_rate" min="2" max="20" step="0.5" value="8" oninput="onLcohSlide()">
+          <div class="sl-ends"><span>2%</span><span>20%</span></div>
+        </div>
+        <div class="sl-group">
+          <div class="sl-row"><span class="sl-lbl">Capacity Factor</span><span class="sl-val" id="lcoh_cf_disp">85%</span></div>
+          <input type="range" class="p-sl" id="lcoh_cf" min="20" max="100" step="5" value="85" oninput="onLcohSlide()">
+          <div class="sl-ends"><span>20%</span><span>100%</span></div>
+        </div>
+      </div>
+      <div class="cost-grid" style="margin-bottom:12px">
+        <div class="cost-card"><div class="cost-lbl">Annualised CAPEX</div><div class="cost-val" id="lcoh_capex_annual">—</div><div class="cost-sub">₹/yr · capital recovery factor</div></div>
+        <div class="cost-card"><div class="cost-lbl">Annual H₂ Output</div><div class="cost-val" id="lcoh_annual_h2">—</div><div class="cost-sub">kg/yr at this capacity factor</div></div>
+        <div class="cost-card"><div class="cost-lbl">LCOH</div><div class="cost-val" id="lcoh_val" style="color:#059669">—</div><div class="cost-sub">₹/kg H₂ · full lifecycle</div></div>
+      </div>
+      <div class="ch-wrap"><div class="ch-title">LCOH Sensitivity — Discount Rate</div><canvas id="ch_lcoh_rate" style="max-height:200px"></canvas></div>
+    </div>
+  </div>
+
+  <!-- DIGITAL TWIN 4.0 -->
+  <div id="tab_dtwin" class="tab-pane">
+    <div class="panel" style="margin-bottom:12px">
+      <div class="panel-title">Digital Twin 4.0 — Architecture</div>
+      <div class="dt-arch">
+        <div class="dt-arch-box"><div class="dt-arch-icon">⚙</div><div>Physical Plant<span>20-cell alkaline stack</span></div></div>
+        <div class="dt-arch-arrow">→</div>
+        <div class="dt-arch-box"><div class="dt-arch-icon">📡</div><div>Sensors &amp; Acquisition<span>V, T, P, flow rate</span></div></div>
+        <div class="dt-arch-arrow">→</div>
+        <div class="dt-arch-box highlight"><div class="dt-arch-icon">🧠</div><div>Digital Twin Model<span>Electrochemical + degradation</span></div></div>
+        <div class="dt-arch-arrow">→</div>
+        <div class="dt-arch-box"><div class="dt-arch-icon">📊</div><div>Analytics &amp; Prediction<span>RUL, forecast, cost</span></div></div>
+        <div class="dt-arch-arrow feedback">↺ closes back to plant</div>
+      </div>
+      <div style="font-size:10px;color:var(--txt3);line-height:1.8;margin-top:6px">
+        The virtual model on the right of this dashboard runs the exact same electrochemical and degradation
+        equations as the physical stack. It's continuously checked against simulated plant sensor readings, and
+        whenever the gap between the two grows, the twin flags itself for recalibration — this closed feedback
+        loop is what separates a Level-4 "self-correcting" digital twin from a simple lookup-table model.
+      </div>
+    </div>
+
+    <div class="dt-stat-grid">
+      <div class="dt-stat-card"><div class="dt-stat-lbl">Twin Fidelity</div><div class="dt-stat-val" id="dt_fidelity">—</div></div>
+      <div class="dt-stat-card"><div class="dt-stat-lbl">Voltage Drift</div><div class="dt-stat-val" id="dt_drift" style="font-size:14px">—</div></div>
+      <div class="dt-stat-card"><div class="dt-stat-lbl">Sensor Latency</div><div class="dt-stat-val" id="dt_latency" style="font-size:16px">—</div></div>
+      <div class="dt-stat-card"><div class="dt-stat-lbl">Sync Status</div><div class="dt-stat-val" id="dt_calib" style="font-size:12px">—</div></div>
+    </div>
+
+    <div class="panel" style="margin-bottom:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px">
+        <div class="panel-title" style="margin-bottom:0">Plant vs Twin — Live Comparison</div>
+        <button class="btn btn-green" onclick="recalibrateTwin()">↻ Recalibrate Twin</button>
+      </div>
+      <div id="dt_status" style="margin-bottom:10px"></div>
+      <div class="ch-wrap"><div style="position:relative;width:100%;height:200px"><canvas id="ch_dt_V"></canvas></div></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Synchronised State</div>
+      <div id="dt_sync_table">—</div>
+    </div>
+  </div>
+
+  <!-- MULTI-OBJECTIVE OPTIMIZATION (NSGA-II) -->
+  <div id="tab_nsga" class="tab-pane">
+    <div class="panel" style="margin-bottom:12px">
+      <div class="panel-title">Multi-Objective Optimization — NSGA-II</div>
+      <div style="font-size:11px;color:var(--txt2);line-height:1.8;margin-bottom:10px">
+        Genetic-algorithm search over T, P and j that jointly maximises efficiency, minimises production cost
+        and minimises electrode/membrane degradation risk, all at once. This is a real NSGA-II — fast
+        non-dominated sorting, crowding distance, SBX crossover and polynomial mutation — running generation
+        by generation right here in the browser, no server needed.
+      </div>
+      <div class="nsga-controls">
+        <div class="nsga-field"><label>Population</label><input type="number" id="nsga_pop" value="60" min="20" max="150"></div>
+        <div class="nsga-field"><label>Generations</label><input type="number" id="nsga_gen" value="40" min="5" max="200"></div>
+        <button class="btn btn-blue" id="nsga_run_btn" onclick="runNSGA()">▶ Run NSGA-II</button>
+      </div>
+      <div class="ai-out" id="nsga_info">Set the population size and generation count, then run the optimizer to generate a Pareto front of non-dominated operating points.</div>
+    </div>
+    <div class="ch-wrap" style="margin-bottom:12px">
+      <div class="ch-title">Pareto Front — Efficiency vs Production Cost (bubble size ≈ degradation risk)</div>
+      <div style="position:relative;width:100%;height:280px"><canvas id="ch_nsga_pareto"></canvas></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Non-Dominated Solutions</div>
+      <div id="nsga_table" style="overflow-x:auto">Run the optimizer to populate this table.</div>
+    </div>
+
+    <!-- ============================================================
+         PARETO FRONT ANALYSIS
+         ============================================================ -->
+    <div class="panel" style="margin-bottom:12px">
+      <div class="panel-title">Pareto Front Analysis</div>
+      <div id="pf_analysis_empty" style="font-size:11px;color:var(--txt3)">Run NSGA-II above first — this section digs into the shape of the front once one exists.</div>
+      <div id="pf_analysis_body" style="display:none">
+        <div class="pf-stat-grid" id="pf_stat_grid"></div>
+        <div class="ch-grid2" style="margin-top:12px">
+          <div class="ch-wrap"><div class="ch-title">Trade-off — Efficiency vs Degradation Risk</div><canvas id="ch_pf_tradeoff1" style="max-height:190px"></canvas></div>
+          <div class="ch-wrap"><div class="ch-title">Trade-off — Production Cost vs Degradation Risk</div><canvas id="ch_pf_tradeoff2" style="max-height:190px"></canvas></div>
+        </div>
+        <div id="pf_knee_note" style="font-size:11px;color:var(--txt2);line-height:1.8;margin-top:10px;padding:10px 12px;background:var(--bg2);border-radius:8px"></div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         TOPSIS — BEST OPERATING POINT
+         ============================================================ -->
+    <div class="panel">
+      <div class="panel-title">TOPSIS Best Operating Point</div>
+      <div style="font-size:11px;color:var(--txt2);line-height:1.8;margin-bottom:10px">
+        A Pareto front, by definition, has no single winner — every point on it beats every other point on
+        <i>something</i>. TOPSIS breaks that tie by measuring each candidate's distance to an ideal solution
+        (best value of every objective, even if no real point achieves all of them at once) and to an
+        anti-ideal one, then picks whichever point is closest to the good corner and farthest from the bad
+        one. Set the weights to whatever actually matters for this plant and re-rank.
+      </div>
+      <div class="topsis-weights" id="topsis_weights"></div>
+      <button class="btn btn-green" onclick="runTOPSIS()" style="margin-top:6px">▶ Rank with TOPSIS</button>
+      <div id="topsis_result" style="margin-top:14px"></div>
+      <div id="topsis_table_wrap" style="margin-top:10px;overflow-x:auto"></div>
+    </div>
+
+  </div>
+
+  <!-- SHAP EXPLAINABILITY -->
+  <div id="tab_shap" class="tab-pane">
+    <div style="display:inline-flex;align-items:center;gap:6px;background:#dbeafe;color:#1d4ed8;font-weight:700;font-size:11px;padding:5px 12px;border-radius:20px;margin-bottom:10px">
+      ✓ Calculated live from the physics model — exact Shapley values, not a placeholder or illustrative example
+    </div>
+    <div class="panel" style="margin-bottom:12px">
+      <div class="panel-title">Local Explanation — Why This Prediction?</div>
+      <div style="font-size:11px;color:var(--txt2);line-height:1.8;margin-bottom:10px">
+        Breaks the current prediction down into a contribution from each input (T, P, j) using exact Shapley
+        values — the marginal effect of each variable averaged over all 6 possible orders in which you could
+        "turn it on" from a neutral reference point. The three contributions always add up exactly to the
+        gap between the reference prediction and the current one, so nothing here is approximate.
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+        <select id="shap_target" onchange="runLocalSHAP()">
+          <option value="V_cell">Target: Cell Voltage</option>
+          <option value="eff">Target: Efficiency</option>
+          <option value="h2_kg_hr">Target: H₂ Production</option>
+          <option value="SEC">Target: SEC</option>
+        </select>
+        <button class="btn btn-blue" onclick="runLocalSHAP()">▶ Explain Current Point</button>
+      </div>
+      <div id="shap_local_summary" style="font-size:11px;color:var(--txt2);margin-bottom:10px"></div>
+      <div class="ch-wrap"><div class="ch-title">Waterfall — Reference Value to Prediction</div><canvas id="ch_shap_waterfall" style="max-height:220px"></canvas></div>
+      <div id="shap_local_table" style="margin-top:10px"></div>
+    </div>
+
+    <div class="panel" style="margin-bottom:12px">
+      <div class="panel-title">Global Feature Importance</div>
+      <div style="font-size:11px;color:var(--txt2);margin-bottom:10px">
+        Same Shapley calculation repeated across 30 random points spread over the whole operating envelope,
+        then averaged. This tells you which variable matters most overall, not just at the one point above.
+      </div>
+      <button class="btn btn-green" onclick="runGlobalSHAP()" style="margin-bottom:10px">▶ Run Global Sampling (30 pts)</button>
+      <div class="ch-wrap"><div class="ch-title">Mean |SHAP value| by parameter</div><canvas id="ch_shap_importance" style="max-height:180px"></canvas></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Dependence Plots</div>
+      <div style="font-size:11px;color:var(--txt2);margin-bottom:10px">Each dot is one of the 30 sampled points — shows whether a variable's effect grows, shrinks, or flips sign across its own range.</div>
+      <div class="ch-grid3">
+        <div class="ch-wrap"><div class="ch-title">SHAP(T) vs Temperature</div><canvas id="ch_shap_dep_T"></canvas></div>
+        <div class="ch-wrap"><div class="ch-title">SHAP(P) vs Pressure</div><canvas id="ch_shap_dep_P"></canvas></div>
+        <div class="ch-wrap"><div class="ch-title">SHAP(j) vs Current Density</div><canvas id="ch_shap_dep_j"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODEL VALIDATION & UNCERTAINTY QUANTIFICATION -->
+  <div id="tab_valid" class="tab-pane">
+    <div class="panel" style="margin-bottom:12px">
+      <div class="panel-title">Model Validation &amp; Error Analysis</div>
+      <div style="font-size:11px;color:var(--txt2);line-height:1.8;margin-bottom:10px">
+        Paste <b>real</b> experimental or digitized-literature points below as <code>j,V_measured</code> — one pair per
+        line, j in A/cm². The model computes RMSE, MAE, R² and MAPE against its own prediction at the current T and P
+        slider settings, plus a parity plot and a residual plot.
+      </div>
+      <div style="background:#fff1f2;border:1px solid #fca5a5;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:11px;color:#7f1d1d;line-height:1.7">
+        ⚠ The rows currently in the box below are <b>placeholder numbers only</b> — not digitized from any paper. Do not
+        report the metrics they produce as validation of anything. Replace them with points you've either measured
+        yourself or digitized from a real published I–V curve (e.g. with WebPlotDigitizer) before this section means
+        anything for a report.
+      </div>
+      <label style="font-size:10px;color:var(--txt3);font-weight:600;text-transform:uppercase;letter-spacing:.6px">Data source / citation</label>
+      <input id="valid_source" type="text" placeholder="e.g. Ulleberg, O. (2003), Int. J. Hydrogen Energy 28, 21-33 — Fig. 4, digitized"
+        style="width:100%;margin:4px 0 10px;padding:7px 10px;font-size:11px;border:1px solid var(--brd);border-radius:6px;background:#ffffff;color:var(--txt1)">
+      <textarea id="valid_input" rows="8" style="width:100%;font-family:'Courier New',monospace;font-size:11px;
+        padding:8px;border:1px solid var(--brd);border-radius:6px;background:#ffffff;color:var(--txt1);resize:vertical"
+># j (A/cm2), V_measured (V) — PLACEHOLDER numbers, not from any source. Replace before using in a report.
+0.05,1.652
+0.10,1.732
+0.15,1.795
+0.20,1.812
+0.30,1.895
+0.40,1.910
+0.60,2.001
+0.80,2.015</textarea>
+      <div style="margin-top:8px">
+        <button class="btn btn-blue" onclick="runValidation()">▶ Compute Error Metrics</button>
+        <button class="btn btn-green" onclick="exportValidationCSV()">⬇ Export CSV</button>
+        <span style="font-size:10px;color:var(--txt3);margin-left:8px">predictions use the current T/P slider values — set them to match the conditions your data was taken at first</span>
+      </div>
+      <div id="valid_summary" style="font-size:11px;color:var(--txt2);margin:10px 0">⏳ Awaiting experimental/reference data — paste real points above and click Compute.</div>
+      <div class="ch-grid2">
+        <div class="ch-wrap"><div class="ch-title">Parity Plot — Predicted vs Measured</div><canvas id="ch_valid_parity" style="max-height:220px"></canvas></div>
+        <div class="ch-wrap"><div class="ch-title">Residuals (Predicted − Measured)</div><canvas id="ch_valid_resid" style="max-height:220px"></canvas></div>
+      </div>
+      <div style="margin-top:10px">
+        <div class="ch-title" style="margin-bottom:6px">Validation Data Table</div>
+        <div id="valid_table" style="overflow-x:auto;font-size:11px;color:var(--txt3)">No rows computed yet.</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Uncertainty Quantification — Monte Carlo</div>
+      <div style="font-size:11px;color:var(--txt2);line-height:1.8;margin-bottom:10px">
+        Treats T, P and j as noisy measurements rather than exact numbers, draws random samples from around the current
+        slider values using the spreads below, runs each sample through the full electrochemical model, and reports the
+        resulting spread in outputs. This is what "the sensor says 80°C but it's really 78.5–81.5°C" does to your efficiency number.
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:12px">
+        <div class="sl-group"><div class="sl-row"><span class="sl-lbl">MC Samples</span><span class="sl-val" id="mc_n_disp">1000</span></div>
+          <input type="range" id="mc_n" min="200" max="4000" step="200" value="1000" oninput="document.getElementById('mc_n_disp').textContent=this.value">
+        </div>
+        <div class="sl-group"><div class="sl-row"><span class="sl-lbl">Temp. Uncertainty (±1σ)</span><span class="sl-val" id="mc_tU_disp">1.5 °C</span></div>
+          <input type="range" class="t-sl" id="mc_tU" min="0.2" max="5" step="0.1" value="1.5" oninput="document.getElementById('mc_tU_disp').textContent=this.value+' °C'">
+        </div>
+        <div class="sl-group"><div class="sl-row"><span class="sl-lbl">Pressure Uncertainty (±1σ)</span><span class="sl-val" id="mc_pU_disp">0.10 bar</span></div>
+          <input type="range" class="p-sl" id="mc_pU" min="0.02" max="1" step="0.02" value="0.1" oninput="document.getElementById('mc_pU_disp').textContent=this.value+' bar'">
+        </div>
+        <div class="sl-group"><div class="sl-row"><span class="sl-lbl">Current Density Unc. (±1σ)</span><span class="sl-val" id="mc_jU_disp">3.0%</span></div>
+          <input type="range" class="j-sl" id="mc_jU" min="0.5" max="10" step="0.5" value="3" oninput="document.getElementById('mc_jU_disp').textContent=this.value+'%'">
+        </div>
+      </div>
+      <button class="btn btn-green" onclick="runMonteCarlo()">▶ Run Monte Carlo</button>
+      <div id="mc_summary" style="font-size:11px;color:var(--txt2);margin:10px 0"></div>
+      <div class="ch-grid2" style="margin-bottom:10px">
+        <div class="ch-wrap"><div class="ch-title">V_cell Distribution at Current Point</div><canvas id="ch_mc_hist" style="max-height:200px"></canvas></div>
+        <div class="ch-wrap"><div class="ch-title">Efficiency vs j — 95% Uncertainty Band</div><canvas id="ch_mc_band" style="max-height:200px"></canvas></div>
+      </div>
+      <div id="mc_table" style="overflow-x:auto"></div>
+    </div>
+  </div>
+
+  <!-- FAULT DIAGNOSIS -->
+  <div id="tab_fault" class="tab-pane">
+    <div class="panel" style="margin-bottom:12px">
+      <div class="panel-title">Anomaly Detection &amp; Fault Diagnosis</div>
+      <div style="font-size:11px;color:var(--txt2);line-height:1.8;margin-bottom:12px">
+        Runs a fixed set of diagnostic rules against the live voltage, temperature, bubble coverage and digital-twin drift
+        every update cycle — not just a threshold on one number, but named fault classes with a likely cause and a recommended
+        action, plus a running log of when each one triggers and clears.
+      </div>
+      <div id="fault_status" style="margin-bottom:14px"></div>
+      <div id="fault_table" style="overflow-x:auto"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Fault Event Log</div>
+      <div style="font-size:11px;color:var(--txt3);margin-bottom:8px">Populated as the live simulation runs — a fault appears here the moment it triggers, and again when it clears.</div>
+      <div id="fault_log" class="maint-timeline">No fault transitions logged yet — this fills in as the live simulation runs.</div>
+    </div>
   </div>
 
 </div><!-- /content -->
@@ -461,6 +818,16 @@
 </div>
 
 </div><!-- /app -->
+<div id="toast_stack" class="toast-stack"></div>
+
+<div id="stage_modal" class="modal-backdrop" onclick="if(event.target===this) closeStageModal()">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeStageModal()">✕</button>
+    <div class="modal-title" id="stage_modal_title">—</div>
+    <div class="modal-body" id="stage_modal_body">—</div>
+  </div>
+</div>
+
 <script src="script.js"></script>
 </body>
 </html>
