@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>Alkaline Electrolyzer Performance Simulation</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<link rel="stylesheet" href="style.css"/>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div class="app">
@@ -142,7 +142,6 @@
     <button class="tab" onclick="showTab('fault',this)">Fault Diagnosis</button>
   </div>
 
-  <!-- LIVE MONITOR -->
   <!-- OVERVIEW / DIGITAL TWIN WORKFLOW -->
   <div id="tab_overview" class="tab-pane active">
     <div class="panel" style="margin-bottom:12px">
@@ -259,9 +258,9 @@
     <div class="card" style="margin-bottom:12px">
       <div class="card-title">Methodology</div>
       <div style="font-size:11px;color:var(--txt2);line-height:2">
-        1. Electrochemical equations implemented from published alkaline electrolyzer studies (LeRoy 1980, Zeng & Zhang 2010).<br>
+        1. Electrochemical equations implemented from published alkaline electrolyzer studies (LeRoy 1980, Zeng &amp; Zhang 2010).<br>
         2. Voltage losses computed using Butler-Volmer activation model and KOH ohmic resistance model.<br>
-        3. Hydrogen production rate obtained via Faraday's law with bubble coverage correction.<br>
+        3. Hydrogen production rate obtained via Faraday's law with bubble coverage and Faradaic-efficiency corrections.<br>
         4. Parametric studies performed over temperature (20–90°C), pressure (1–10 bar) and current density (0.05–1.0 A/cm²).
       </div>
     </div>
@@ -302,9 +301,11 @@
         Sᵢ = |∂ṁH₂/∂xᵢ| · xᵢ/ṁH₂ — central finite differences at current operating point
       </div>
       <div style="font-size:10px;color:var(--txt3);margin-bottom:12px">
-        Note: H₂ production is set almost entirely by current density (Faraday's law), so that target alone will
-        always show j near 100% — that's real electrochemistry, not a bug. Switch to Voltage, Efficiency or SEC
-        above to see temperature and pressure actually carry meaningful weight.
+        Note: H₂ production is set almost entirely by current density (Faraday's law), so current density will always
+        carry the large majority of the weight for that target — that's real electrochemistry, not a bug. Temperature and
+        pressure now also carry a small, correctly non-zero weight here (via their effect on Faradaic/current efficiency —
+        crossover losses), instead of always rounding to exactly 0.0%. Switch to Voltage, Efficiency or SEC above to see
+        temperature and pressure carry substantially more weight.
       </div>
       <div id="sens_bars"></div>
     </div>
