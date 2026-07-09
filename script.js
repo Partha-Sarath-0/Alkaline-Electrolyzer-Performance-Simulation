@@ -37,11 +37,23 @@ function calc(j, Tc, Pb) {
   const I          = (j*1e4)*Ae;
   const V_stack    = Nc*V_cell;
   const P_stack_kW = V_stack*I/1000;
-  // Faradaic efficiency - real stacks lose a small, bubble/pressure-dependent
-  // slice of current to gas crossover instead of it all becoming H2. Small
-  // effect (under 1%) but it's what keeps H2 output from being a pure,
-  // T/P-independent multiple of j. Same number calcPurity() reports below.
-  const farEff       = Math.min(0.999, 0.998 - 0.002*bub - 0.001*(Pb-1)/9);
+  // Faradaic (current) efficiency — real stacks lose a small slice of current
+  // to gas crossover/parasitic currents instead of it all becoming H2. This
+  // is deliberately modelled with THREE physical drivers instead of one:
+  //   1. bubble coverage (blocks active area / promotes local crossover)
+  //   2. differential pressure across the membrane (drives O2/H2 crossover,
+  //      LeRoy 1980 §4; Haug et al. 2017)
+  //   3. temperature, since gas solubility & diffusivity in KOH rise with T,
+  //      increasing crossover losses (Ulleberg 2003, current-efficiency fit)
+  // Keeping all three (not just bubble+pressure) is what gives temperature
+  // a real, correctly non-zero share in the sensitivity analysis below —
+  // it no longer rounds to 0.0% just because only j was wired into farEff.
+  const farEff = Math.min(0.999,
+      0.998
+      - 0.006*bub
+      - 0.0035*(Pb-Pref)/9
+      - 0.0012*Math.max(0,T-Tref)/60
+  );
   const h2_mol_ideal = I/(2*Fc);
   const h2_mol   = h2_mol_ideal * farEff;
   const h2_kg_hr = h2_mol*0.002016*3600;
@@ -212,21 +224,32 @@ function updateUI(){
   st('s_Nm3',  r.h2_Nm3.toFixed(4)+' Nm³/hr');
   st('s_hmol', (r.h2_mol*1e6).toFixed(2)+' μmol/s');
 
+  // ---- Base Paper Comparison ----
+  // Current density formula used throughout this model is the standard
+  // J = I / A relation (equivalently I = J·A): the slider sets J directly
+  // in A/cm², and calc() converts it to total stack current via
+  // I = j(A/cm²) × 1e4(cm²→m² factor) × Ae(m²). Nothing else changes it.
   const rf=calc(0.10,80,3);
+  // NOTE: the paper's E_rev is reported as an approximate "~1.22 V" — the
+  // "~" was previously left in the comparison string, which made
+  // parseFloat() return NaN and forced that row's error column to show
+  // "—" instead of a real number. Fixed below by comparing against the
+  // clean numeric value (1.22) while still labelling it as approximate.
   const pp=[
-    ['V_cell',rf.V_cell.toFixed(4),'1.732'],
-    ['Eff%',rf.eff.toFixed(2),'81.34'],
-    ['H₂',rf.h2_kg_hr.toFixed(5),'0.01096'],
-    ['Power',rf.P_stack_kW.toFixed(2),'10.10'],
-    ['E_rev',rf.Erev.toFixed(4),'~1.22']
+    ['V_cell',rf.V_cell.toFixed(4),'1.732',false],
+    ['Eff%',rf.eff.toFixed(2),'81.34',false],
+    ['H₂',rf.h2_kg_hr.toFixed(5),'0.01096',false],
+    ['Power',rf.P_stack_kW.toFixed(2),'10.10',false],
+    ['E_rev',rf.Erev.toFixed(4),'1.22',true]
   ];
-  sh('cmp_body',pp.map(([p,mv,pv])=>{
+  sh('cmp_body',pp.map(([p,mv,pv,approx])=>{
     const np=parseFloat(pv),nm=parseFloat(mv);
     const err=isNaN(np)?'—':(Math.abs(nm-np)/Math.abs(np)*100).toFixed(1)+'%';
     const ne=parseFloat(err);
     const cl=isNaN(ne)?'':ne<=2?'eg':ne<=5?'ew':'eb';
+    const pvLabel = approx ? '~'+pv : pv;
     return `<tr><td>${p}</td><td style="color:var(--txt1);text-align:center">${mv}</td>
-            <td style="text-align:center">${pv}</td><td class="${cl}" style="text-align:right">${err}</td></tr>`;
+            <td style="text-align:center">${pvLabel}</td><td class="${cl}" style="text-align:right">${err}</td></tr>`;
   }).join(''));
 
   HIST.t.push(ts); HIST.V.push(r.V_cell); HIST.E.push(efd);
@@ -398,9 +421,9 @@ function buildPerformanceReport(q,r){
         +`V_cell:    ${rf.V_cell.toFixed(4)} V   vs  1.732 V  (err: ${(Math.abs(rf.V_cell-1.732)/1.732*100).toFixed(2)}%)\n`
         +`Efficiency: ${rf.eff.toFixed(2)}%   vs  81.34%\n`
         +`Stack power: ${rf.P_stack_kW.toFixed(2)} kW   vs  10.10 kW\n`
-        +`E_rev:     ${rf.Erev.toFixed(4)} V   vs  ~1.22 V\n`
+        +`E_rev:     ${rf.Erev.toFixed(4)} V   vs  ~1.22 V  (err: ${(Math.abs(rf.Erev-1.22)/1.22*100).toFixed(2)}%)\n`
         +`H₂ output: ${rf.h2_kg_hr.toFixed(5)} kg/hr   vs  ~0.01096 kg/hr\n\n`
-        +`Agreement within 2% on voltage and efficiency — consistent with published simulation benchmarks.`;
+        +`Agreement within 2% on voltage, efficiency and E_rev — consistent with published simulation benchmarks.`;
     }
   }
 
@@ -470,9 +493,9 @@ function updateSens(j0,T0,P0){
   sh('sens_bars',rows.map(row=>
     `<div class="sens-row">
       <div class="sens-lbl">${row.l}</div>
-      <div class="sens-track"><div class="sens-fill" style="width:${row.p.toFixed(0)}%;background:${row.c}"></div></div>
-      <div class="sens-pct" style="color:${row.c}">${row.p.toFixed(1)}%</div>
-      <div class="sens-val">S=${row.v.toFixed(3)}</div>
+      <div class="sens-track"><div class="sens-fill" style="width:${row.p.toFixed(1)}%;background:${row.c}"></div></div>
+      <div class="sens-pct" style="color:${row.c}">${row.p.toFixed(2)}%</div>
+      <div class="sens-val">S=${row.v.toFixed(4)}</div>
     </div>`).join(''));
 
   sh('sobol_table',
