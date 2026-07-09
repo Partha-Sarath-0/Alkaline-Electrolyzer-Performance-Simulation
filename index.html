@@ -269,9 +269,9 @@
         <div class="panel-title" style="margin-bottom:0">Performance Evaluation</div>
         <button class="btn btn-blue" id="report_btn" onclick="evaluatePerformance('')">▶ Generate Report</button>
       </div>
-      <div class="ai-out" id="report_out">Click the button to generate a full performance report at the current operating point.</div>
-      <div class="ai-row">
-        <input class="ai-inp" id="report_query" placeholder="Ask an engineering question about this electrolyzer..."
+      <div class="report-out" id="report_out">Click the button to generate a full performance report at the current operating point.</div>
+      <div class="report-row">
+        <input class="report-inp" id="report_query" placeholder="Ask an engineering question about this electrolyzer..."
           onkeydown="if(event.key==='Enter')evaluatePerformance(this.value)"/>
         <button class="btn btn-blue" onclick="evaluatePerformance(document.getElementById('report_query').value)">Ask</button>
       </div>
@@ -618,7 +618,7 @@
         <div class="nsga-field"><label>Generations</label><input type="number" id="nsga_gen" value="40" min="5" max="200"></div>
         <button class="btn btn-blue" id="nsga_run_btn" onclick="runNSGA()">▶ Run NSGA-II</button>
       </div>
-      <div class="ai-out" id="nsga_info">Set the population size and generation count, then run the optimizer to generate a Pareto front of non-dominated operating points.</div>
+      <div class="report-out" id="nsga_info">Set the population size and generation count, then run the optimizer to generate a Pareto front of non-dominated operating points.</div>
     </div>
     <div class="ch-wrap" style="margin-bottom:12px">
       <div class="ch-title">Pareto Front — Efficiency vs Production Cost (bubble size ≈ degradation risk)</div>
